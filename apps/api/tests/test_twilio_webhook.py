@@ -33,7 +33,7 @@ def test_incoming_call_returns_stream_twiml(client: TestClient) -> None:
     assert say is not None and "not a doctor" in (say.text or "")
     stream = root.find("Connect/Stream")
     assert stream is not None
-    assert stream.get("url") == "wss://careflow.example.com/twilio/media-stream"
+    assert stream.get("url") == "wss://clinexa.example.com/twilio/media-stream"
     params = {p.get("name"): p.get("value") for p in stream.findall("Parameter")}
     assert params["stream_token"] == stream_token("CA123")
     # The full caller number never leaves the webhook.

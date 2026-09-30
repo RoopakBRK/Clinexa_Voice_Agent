@@ -1,0 +1,171 @@
+{
+  "documents": [
+    {
+      "doc_id": "who-malaria-guidelines",
+      "title": "WHO guidelines for malaria",
+      "pages": 492,
+      "sections": 494,
+      "chunks": 1777,
+      "retrievable_chunks": 1666,
+      "tokens_p50": 274.0,
+      "tokens_p95": 346.0,
+      "tokens_max": 400,
+      "chunk_types": {
+        "table": 450,
+        "text": 1252,
+        "recommendation": 67,
+        "warning": 8
+      },
+      "populations": {
+        "all": 1667,
+        "pregnancy": 72,
+        "child": 38
+      },
+      "top_topics": {
+        "malaria": 1445,
+        "immunization": 193,
+        "medication": 53,
+        "infectious_disease": 45,
+        "maternal_reproductive": 17
+      }
+    },
+    {
+      "doc_id": "who-mhgap-ig-v2",
+      "title": "mhGAP Intervention Guide for mental, neurological and substance use disorders in non-specialized health settings, version 2.0",
+      "pages": 169,
+      "sections": 95,
+      "chunks": 233,
+      "retrievable_chunks": 229,
+      "tokens_p50": 269.0,
+      "tokens_p95": 354.4,
+      "tokens_max": 389,
+      "chunk_types": {
+        "text": 176,
+        "table": 40,
+        "recommendation": 4,
+        "warning": 13
+      },
+      "populations": {
+        "all": 199,
+        "pregnancy": 4,
+        "child": 30
+      },
+      "top_topics": {
+        "mental_health": 120,
+        "substance_use": 47,
+        "neurological": 29,
+        "medication": 16,
+        "maternal_reproductive": 8
+      }
+    },
+    {
+      "doc_id": "who-pocket-book-hospital-care-children",
+      "title": "Pocket book of hospital care for children: guidelines for the management of common childhood illnesses, 2nd edition",
+      "pages": 438,
+      "sections": 358,
+      "chunks": 764,
+      "retrievable_chunks": 684,
+      "tokens_p50": 275.0,
+      "tokens_p95": 350.0,
+      "tokens_max": 401,
+      "chunk_types": {
+        "text": 497,
+        "warning": 56,
+        "table": 211
+      },
+      "populations": {
+        "child": 764
+      },
+      "top_topics": {
+        "infectious_disease": 168,
+        "child_health": 132,
+        "emergency": 80,
+        "respiratory": 77,
+        "medication": 69
+      }
+    },
+    {
+      "doc_id": "who-euro-pocket-book-phc-children",
+      "title": "Pocket book of primary health care for children and adolescents: guidelines for health promotion, disease prevention and management from the newborn period to adolescence",
+      "pages": 940,
+      "sections": 509,
+      "chunks": 1285,
+      "retrievable_chunks": 1110,
+      "tokens_p50": 273.0,
+      "tokens_p95": 355.0,
+      "tokens_max": 405,
+      "chunk_types": {
+        "text": 823,
+        "warning": 175,
+        "table": 287
+      },
+      "populations": {
+        "child": 1285
+      },
+      "top_topics": {
+        "child_health": 170,
+        "infectious_disease": 159,
+        "neonatal": 103,
+        "nutrition": 100,
+        "respiratory": 85
+      }
+    },
+    {
+      "doc_id": "who-bsi-cvc-guidelines",
+      "title": "Guidelines for the prevention of bloodstream infections and other infections associated with the use of intravascular catheters. Part 2: central venous catheters",
+      "pages": 152,
+      "sections": 96,
+      "chunks": 405,
+      "retrievable_chunks": 182,
+      "tokens_p50": 292.0,
+      "tokens_p95": 348.0,
+      "tokens_max": 407,
+      "chunk_types": {
+        "text": 310,
+        "table": 40,
+        "recommendation": 55
+      },
+      "populations": {
+        "all": 405
+      },
+      "top_topics": {
+        "infection_prevention": 334,
+        "infectious_disease": 63,
+        "skin": 4,
+        "neonatal": 3,
+        "substance_use": 1
+      }
+    },
+    {
+      "doc_id": "sa-ndoh-adult-primary-care",
+      "title": "Adult Primary Care (APC) 2016/2017: symptom-based integrated approach to the adult in primary care",
+      "pages": 117,
+      "sections": 225,
+      "chunks": 357,
+      "retrievable_chunks": 346,
+      "tokens_p50": 247.0,
+      "tokens_p95": 350.0,
+      "tokens_max": 392,
+      "chunk_types": {
+        "text": 177,
+        "table": 87,
+        "warning": 93
+      },
+      "populations": {
+        "adult": 357
+      },
+      "top_topics": {
+        "infectious_disease": 85,
+        "maternal_reproductive": 48,
+        "adult_primary_care": 38,
+        "cardiovascular": 27,
+        "mental_health": 26
+      }
+    }
+  ],
+  "total_chunks": 4821,
+  "total_retrievable": 4217,
+  "target_tokens": 350,
+  "embedding_tokenizer": "BAAI/bge-small-en-v1.5",
+  "duration_s": 10.3
+}

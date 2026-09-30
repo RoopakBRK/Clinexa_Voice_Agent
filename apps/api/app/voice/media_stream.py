@@ -67,7 +67,9 @@ async def media_stream(
                 case ConnectedMessage() | None:
                     pass
                 case other:
-                    log.warning("twilio.unexpected_message", event=getattr(other, "event", None))
+                    log.warning(
+                        "twilio.unexpected_message", twilio_event=getattr(other, "event", None)
+                    )
     finally:
         if session is not None:
             registry.finish(session.call_sid)
@@ -92,7 +94,9 @@ async def _start_session(
     structlog.contextvars.bind_contextvars(call_sid=start.call_sid, stream_sid=msg.stream_sid)
 
     token = start.custom_parameters.get(STREAM_TOKEN_PARAM)
-    if not verify_stream_token(settings.stream_token_secret.get_secret_value(), start.call_sid, token):
+    if not verify_stream_token(
+        settings.stream_token_secret.get_secret_value(), start.call_sid, token
+    ):
         log.warning("media_stream.rejected", reason="invalid_stream_token")
         await websocket.close(code=WS_POLICY_VIOLATION)
         return None

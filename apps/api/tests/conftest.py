@@ -21,7 +21,7 @@ from app.voice.security import sign_stream_token
 
 AUTH_TOKEN = "test-twilio-auth-token"
 STREAM_SECRET = "test-stream-secret"
-PUBLIC_BASE_URL = "https://careflow.example.com"
+PUBLIC_BASE_URL = "https://clinexa.example.com"
 
 
 class FakeSTTProvider(STTProvider):
@@ -96,7 +96,11 @@ def twilio_media(audio: bytes, *, stream_sid: str = "MZtest", track: str = "inbo
 
 def twilio_stop(call_sid: str, *, stream_sid: str = "MZtest") -> str:
     return json.dumps(
-        {"event": "stop", "streamSid": stream_sid, "stop": {"accountSid": "ACtest", "callSid": call_sid}}
+        {
+            "event": "stop",
+            "streamSid": stream_sid,
+            "stop": {"accountSid": "ACtest", "callSid": call_sid},
+        }
     )
 
 

@@ -1,0 +1,87 @@
+# Source documents for the Clinexa knowledge base.
+#
+# Every field here becomes chunk metadata (and a Qdrant payload filter), so keep it
+# accurate: publisher/title/ISBN are taken from each document's own title and
+# copyright pages. source_url is only set when the URL is printed in the document.
+#
+# structure: how section hierarchy is recovered — see StructureStrategy in
+#            apps/api/app/rag/ingestion/manifest.py
+# population: adult | child | all  (chunk-level cues can narrow "all")
+
+documents:
+  - doc_id: who-malaria-guidelines
+    file: whomalaria.pdf
+    title: WHO guidelines for malaria
+    publisher: World Health Organization
+    document_type: clinical_guideline
+    population: all
+    publication_date: "2026-09-10"
+    source_url: https://app.magicapp.org/#/guideline/LwRMXj
+    topics: [malaria, infectious_disease]
+    structure: toc
+    skip_pages: [[1, 2]]  # cover + MAGICapp disclaimer
+
+  - doc_id: who-mhgap-ig-v2
+    file: WHO_Mhap_Prevention_guide.pdf
+    title: "mhGAP Intervention Guide for mental, neurological and substance use disorders in non-specialized health settings, version 2.0"
+    publisher: World Health Organization
+    document_type: intervention_guide
+    population: all
+    publication_date: "2016"
+    isbn: "978 92 4 154979 0"
+    topics: [mental_health, neurological, substance_use]
+    structure: running
+    skip_pages: [[1, 1], [5, 8]]  # cover; preface and credits (people, offices, funders)
+    section_aliases:  # the PDF's running header is corrupted/inconsistent on these pages
+      "Essential Care and Practice& Practi E": Essential Care and Practice
+      "Essential Care and Practice& Practi": Essential Care and Practice
+      "Essential Care & Practice": Essential Care and Practice
+      "Self-harm /suicide": Self-harm
+      "Self Harm": Self-harm
+      "Implementation of": Implementation
+
+  - doc_id: who-pocket-book-hospital-care-children
+    file: WHO_children_care.pdf
+    title: "Pocket book of hospital care for children: guidelines for the management of common childhood illnesses, 2nd edition"
+    publisher: World Health Organization
+    document_type: pocket_book
+    population: child
+    publication_date: "2013"
+    isbn: "978 92 4 154837 3"
+    topics: [child_health]
+    structure: numbered
+
+  - doc_id: who-euro-pocket-book-phc-children
+    file: 9789289057622-eng.pdf
+    title: "Pocket book of primary health care for children and adolescents: guidelines for health promotion, disease prevention and management from the newborn period to adolescence"
+    publisher: WHO Regional Office for Europe
+    document_type: pocket_book
+    population: child
+    publication_date: "2022"
+    isbn: "978-92-890-5762-2"
+    topics: [child_health]
+    structure: numbered
+
+  - doc_id: who-bsi-cvc-guidelines
+    file: whobloodstreaminfections.pdf
+    title: "Guidelines for the prevention of bloodstream infections and other infections associated with the use of intravascular catheters. Part 2: central venous catheters"
+    publisher: World Health Organization
+    document_type: clinical_guideline
+    population: all
+    publication_date: "2026"
+    isbn: "978-92-4-012180-5"
+    topics: [infection_prevention]
+    structure: numbered
+
+  # NOTE: not a WHO publication. South African national primary-care guide,
+  # kept as a supplementary source and labelled with its real publisher.
+  - doc_id: sa-ndoh-adult-primary-care
+    file: who_primary_adult_care.pdf
+    title: "Adult Primary Care (APC) 2016/2017: symptom-based integrated approach to the adult in primary care"
+    publisher: "National Department of Health, South Africa (Knowledge Translation Unit, University of Cape Town)"
+    document_type: clinical_tool
+    population: adult
+    publication_date: "2016"
+    topics: [adult_primary_care]
+    structure: caps_topics
+    skip_pages: [[1, 1]]  # cover

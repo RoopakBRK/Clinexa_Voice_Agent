@@ -75,7 +75,12 @@ async def simulate(args: argparse.Namespace) -> None:
     audio = load_audio(args) + MULAW_SILENCE * int(8000 * TRAILING_SILENCE_S)
     call_sid = f"CAsim{uuid.uuid4().hex[:28]}"
     stream_sid = f"MZsim{uuid.uuid4().hex[:28]}"
-    form = {"CallSid": call_sid, "From": "+15550100123", "To": "+15550100999", "AccountSid": "ACsim"}
+    form = {
+        "CallSid": call_sid,
+        "From": "+15550100123",
+        "To": "+15550100999",
+        "AccountSid": "ACsim",
+    }
 
     # Twilio signs the public URL it called; mirror that so signature checks pass.
     signed_url = f"{settings.public_base_url or args.api}/twilio/voice"
@@ -92,7 +97,9 @@ async def simulate(args: argparse.Namespace) -> None:
 
         print(f"call {call_sid}: streaming {len(audio) / 8000:.1f}s of audio to {ws_url}")
         async with connect(ws_url) as ws:
-            await ws.send(json.dumps({"event": "connected", "protocol": "Call", "version": "1.0.0"}))
+            await ws.send(
+                json.dumps({"event": "connected", "protocol": "Call", "version": "1.0.0"})
+            )
             await ws.send(
                 json.dumps(
                     {
@@ -122,7 +129,11 @@ async def simulate(args: argparse.Namespace) -> None:
                 await ws.send(json.dumps(message))
                 # Pace like a real call: frame i is due at i * 20 ms.
                 await asyncio.sleep(max(0.0, t0 + (i + 1) * 0.02 - time.monotonic()))
-            await ws.send(json.dumps({"event": "stop", "streamSid": stream_sid, "stop": {"callSid": call_sid}}))
+            await ws.send(
+                json.dumps(
+                    {"event": "stop", "streamSid": stream_sid, "stop": {"callSid": call_sid}}
+                )
+            )
 
         for _ in range(50):
             call = (await http.get(f"/api/calls/{call_sid}")).json()
@@ -139,7 +150,9 @@ async def simulate(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--text", help="speak this text with macOS `say`")
     source.add_argument("--wav", help="8 kHz mono 16-bit PCM WAV file")

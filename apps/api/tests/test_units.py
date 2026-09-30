@@ -44,7 +44,12 @@ def test_parse_media_message_decodes_audio() -> None:
             "event": "media",
             "sequenceNumber": "3",
             "streamSid": "MZ1",
-            "media": {"track": "inbound", "chunk": "1", "timestamp": "5", "payload": base64.b64encode(b"\x01\x02").decode()},
+            "media": {
+                "track": "inbound",
+                "chunk": "1",
+                "timestamp": "5",
+                "payload": base64.b64encode(b"\x01\x02").decode(),
+            },
         }
     )
     msg = parse_inbound(raw)

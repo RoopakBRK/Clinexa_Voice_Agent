@@ -69,7 +69,16 @@ class ClinicalIntake(BaseModel):
         return [f for f in fields if getattr(self, f) in (None, "", [])]
 
 
+class ChunkType(StrEnum):
+    TEXT = "text"
+    TABLE = "table"
+    RECOMMENDATION = "recommendation"
+    WARNING = "warning"  # danger signs / urgent-referral content
+
+
 class DocumentMetadata(BaseModel):
+    """Per-chunk metadata; also the Qdrant payload used for filtering."""
+
     source: str
     document_title: str
     document_type: str
@@ -80,6 +89,14 @@ class DocumentMetadata(BaseModel):
     population: str | None = None
     publication_date: str | None = None
     source_url: str | None = None
+    document_id: str | None = None
+    publisher: str | None = None
+    heading_path: list[str] = Field(default_factory=list)
+    page_end: int | None = None
+    chunk_type: ChunkType = ChunkType.TEXT
+    topics: list[str] = Field(default_factory=list)
+    # False for front matter, references, contents pages etc. (kept for audit, not indexed)
+    retrievable: bool = True
 
 
 class RetrievalScores(BaseModel):

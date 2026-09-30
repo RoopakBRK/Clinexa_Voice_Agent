@@ -28,7 +28,10 @@ API_KEY = "dg-test-key"
 def results(
     text: str, *, start: float, duration: float, is_final: bool, speech_final: bool = False
 ) -> dict[str, Any]:
-    words = [{"word": w, "start": start, "end": start + duration, "confidence": 0.95} for w in text.split()]
+    words = [
+        {"word": w, "start": start, "end": start + duration, "confidence": 0.95}
+        for w in text.split()
+    ]
     return {
         "type": "Results",
         "start": start,
@@ -84,7 +87,9 @@ async def run(fake: FakeDeepgram, api_key: str = API_KEY, frames: int = 5) -> li
             url=f"ws://127.0.0.1:{port}/v1/listen",
             keyterms=["paracetamol", "shortness of breath"],
         )
-        return [e async for e in provider.transcribe_stream(audio_frames(frames), TWILIO_AUDIO_FORMAT)]
+        return [
+            e async for e in provider.transcribe_stream(audio_frames(frames), TWILIO_AUDIO_FORMAT)
+        ]
 
 
 async def test_streams_audio_and_parses_events() -> None:

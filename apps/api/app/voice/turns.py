@@ -54,9 +54,7 @@ class UtteranceAssembler:
         if not self._segments:
             return None
         confidence = (
-            round(sum(self._confidences) / len(self._confidences), 4)
-            if self._confidences
-            else None
+            round(sum(self._confidences) / len(self._confidences), 4) if self._confidences else None
         )
         utterance = Utterance(
             text=self.pending_text,

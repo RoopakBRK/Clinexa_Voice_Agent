@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
 
     # --- Application -------------------------------------------------------
-    app_name: str = "CareFlow AI"
+    app_name: str = "Clinexa"
     environment: Literal["local", "test", "staging", "production"] = "local"
     log_level: str = "INFO"
     log_json: bool = True
@@ -65,14 +65,42 @@ class Settings(BaseSettings):
     stt_max_reconnect_attempts: int = Field(default=3, ge=0)
     audio_queue_max_frames: int = Field(default=1500, ge=50)  # ~30 s of 20 ms frames
 
+    # --- Knowledge base / RAG ----------------------------------------------
+    data_dir: Path = REPO_ROOT / "data"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Chunk budget in embedding-model tokens (bge-small max is 512, incl. context header).
+    chunk_target_tokens: int = Field(default=350, ge=64, le=480)
+    chunk_min_tokens: int = Field(default=60, ge=0)
+    chunk_overlap_tokens: int = Field(default=50, ge=0)
+    # Consecutive sibling sections smaller than this are merged into one chunk.
+    chunk_section_merge_tokens: int = Field(default=150, ge=0)
+    # BGE retrieval models embed short queries with this instruction; passages get none.
+    embedding_query_instruction: str = "Represent this sentence for searching relevant passages: "
+    embedding_batch_size: int = Field(default=32, ge=1)
+    embedding_device: str | None = None  # None = auto (mps / cuda / cpu)
+
+    # --- Qdrant --------------------------------------------------------------
+    # QDRANT_URL set   -> Qdrant Cloud / server.  Unset -> embedded local index under
+    # data/indexes/qdrant (same client API; one process at a time; fine for development).
+    qdrant_url: str | None = None
+    qdrant_api_key: SecretStr | None = None
+    qdrant_collection: str = "clinexa_who_primary_care"
+    qdrant_timeout_s: int = Field(default=30, ge=1)
+    qdrant_local_path: Path = REPO_ROOT / "data" / "indexes" / "qdrant"
+
     # --- Conversation ------------------------------------------------------
     emergency_number_phrase: str = "your local emergency number"
     call_greeting: str = (
-        "Hello, you've reached CareFlow, an automated health information assistant. "
+        "Hello, you've reached Clinexa, an automated health information assistant. "
         "I'm not a doctor and can't diagnose conditions. "
         "If this is an emergency, please hang up and call {emergency}. "
         "How can I help you today?"
     )
+
+    @field_validator("qdrant_url", "qdrant_api_key", "embedding_device", mode="before")
+    @classmethod
+    def _blank_is_none(cls, v: object) -> object:
+        return None if isinstance(v, str) and not v.strip() else v
 
     @field_validator("public_base_url")
     @classmethod

@@ -114,8 +114,8 @@ class DeepgramSTTProvider(STTProvider):
             await asyncio.gather(keepalive, sender, return_exceptions=True)
             await ws.close()
 
-        if sender.done() and not sender.cancelled() and (exc := sender.exception()):
-            raise STTError(f"Deepgram audio sender failed: {exc!r}") from exc
+        if sender.done() and not sender.cancelled() and (send_error := sender.exception()):
+            raise STTError(f"Deepgram audio sender failed: {send_error!r}") from send_error
         if ws.close_code not in (None, 1000):
             raise STTError(f"Deepgram closed stream: code={ws.close_code} {ws.close_reason!r}")
 
