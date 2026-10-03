@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.agents.responder import ReplyGenerator
 from app.core.config import Settings
+from app.graph.state import ConversationMessage
 from app.main import create_app
 from app.voice.providers.base import (
     AudioFormat,
@@ -16,6 +19,8 @@ from app.voice.providers.base import (
     STTProvider,
     TranscriptEvent,
     TranscriptEventType,
+    TTSError,
+    TTSProvider,
 )
 from app.voice.security import sign_stream_token
 
@@ -50,6 +55,76 @@ class FakeSTTProvider(STTProvider):
             self.received.extend(chunk)
         for event in self.script:
             yield event
+
+
+class LiveFakeSTTProvider(STTProvider):
+    """A caller mid-call: emits one scripted event per audio chunk received.
+
+    Unlike ``FakeSTTProvider`` the events arrive while the call is still open,
+    which is when replies are generated.
+    """
+
+    name = "fake-live"
+
+    def __init__(self, script: list[TranscriptEvent]) -> None:
+        self.script = script
+
+    async def transcribe_stream(
+        self, audio: AsyncIterator[bytes], audio_format: AudioFormat
+    ) -> AsyncIterator[TranscriptEvent]:
+        for event in self.script:
+            try:
+                await anext(audio)
+            except StopAsyncIteration:
+                return
+            yield event
+        async for _ in audio:
+            pass
+
+
+class FakeReplyGenerator(ReplyGenerator):
+    """Streams scripted text deltas; one script per reply, the last one repeating."""
+
+    name = "fake"
+
+    def __init__(self, *replies: list[str | Exception]) -> None:
+        self.replies = list(replies)
+        self.histories: list[list[ConversationMessage]] = []
+        # Tests can hold a reply open by clearing this before the turn starts.
+        self.gate = asyncio.Event()
+        self.gate.set()
+
+    async def stream_reply(self, history: Sequence[ConversationMessage]) -> AsyncIterator[str]:
+        self.histories.append(list(history))
+        script = self.replies[min(len(self.histories), len(self.replies)) - 1]
+        for item in script:
+            if isinstance(item, Exception):
+                raise item
+            yield item
+            await self.gate.wait()
+
+
+class FakeTTSProvider(TTSProvider):
+    """Returns one audio chunk per sentence: the sentence's own bytes."""
+
+    name = "fake"
+
+    def __init__(self, fail_after: int | None = None) -> None:
+        self.fail_after = fail_after
+        self.spoken: list[str] = []
+        self.streams_closed = 0
+
+    async def synthesize_stream(
+        self, text: AsyncIterator[str], audio_format: AudioFormat
+    ) -> AsyncIterator[bytes]:
+        try:
+            async for sentence in text:
+                if self.fail_after is not None and len(self.spoken) >= self.fail_after:
+                    raise TTSError("simulated synthesis failure")
+                self.spoken.append(sentence)
+                yield sentence.encode()
+        finally:
+            self.streams_closed += 1
 
 
 def final(text: str, *, speech_final: bool = False, confidence: float = 0.9) -> TranscriptEvent:
@@ -119,6 +194,7 @@ def settings() -> Settings:
         twilio_auth_token=AUTH_TOKEN,
         stream_token_secret=STREAM_SECRET,
         deepgram_api_key=None,
+        anthropic_api_key=None,
     )
 
 

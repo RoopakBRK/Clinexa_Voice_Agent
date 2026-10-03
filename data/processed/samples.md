@@ -342,6 +342,72 @@ The GDG considered the very low certainty of evidence that using ultrasound-guid
 
 ## sa-ndoh-adult-primary-care
 
+### `sa-ndoh-adult-primary-care:p0024:98de7f357815`
+*Mouth and Throat Symptoms > Management* · pages 24–24 · warning · adult · topics ['eye_ent', 'skin', 'infectious_disease'] · 270 tokens
+
+```text
+- Refer same day
+
+Examine the mouth and throat for redness, white patches, blisters or ulcers.
+
+Red throat
+
+Are there pus or white patches on tonsils?
+
+No
+
+Yes
+
+Viral pharyngitis likely
+
+Bacterial tonsillitis likely
+
+- Give paracetamol 1g - • Give paracetamol 6 hourly 1g 6 hourly • Salt water mouthwash
+- Salt water mouthwash
+- Give benzathine
+- penicillin 1.2MU IM single dose or phenoxymethylpenicillin 500mg 12 hourly for 10 days. If severe penicillin allergy , give azithromycin 500mg daily for 3 days instead.
+- Reassure patient that antibiotics are not necessary.
+
+Painful blisters on lips/mouth
+
+White patches on cheeks, gums, tongue, palate, may have angular cheilitis (cracks in corners of mouth).
+
+Herpes simplex likely
+
+Oral thrush/candida likely
+
+- Apply tetracaine 0.5% on blisters 6 hourly.
+
+Nystatin suspension 1mℓ orally after eating for 7 days. Keep in mouth as long as possible.
+
+- If HIV give aciclovir 400mg 8 hourly for 7 days if: - Ulcers are extensive or recurrent - Severe pain
+- Ulcers present for > 1 month
+```
+
+### `sa-ndoh-adult-primary-care:p0105:d39dd274b437`
+*Contraception: Routine Care > Late injection* · pages 105–105 · text · adult · topics ['maternal_reproductive', 'emergency'] · 329 tokens
+
+```text
+- < 2 weeks late for norethisterone enanthate or < 4 weeks late for medroxyprogesterone acetate: give injection.
+- ≥ 2 weeks late for norethisterone enanthate or ≥ 4 weeks late for medroxyprogesterone acetate: exclude pregnancy. If pregnant  100. If not pregnant, give injection and use condoms for 7 days.
+- If unable to exclude pregnancy give progesterone-only pill and condoms for 2 weeks, then give injection if pregnancy test negative.
+- Missed/late Missed combined oral contraceptive pill - progesterone only pill • 1 active pill missed: take pill as soon as remembered and take next pill at usual time. - • Pill missed or > than 3 hours late: • ≥ 2 active pills missed: take last missed pill as soon as remembered and next pill at take pill as soon as possible and usual time. Use condoms or abstain for next 7 days. continue pack and use condoms - If missed pills were from last 7 active pills of pack: omit the inactive tablets and for 48 hours. immediately start first active pill of next pack. - • If ≤ 5 days since unprotected sex, - If missed pills were from first 7 active pills of pack and patient has had sex in past give emergency contraception 5 days: give emergency contraception 98, restart active pills 12 hours later 98. and use condoms for next 7 days.
+
+Follow up the patient on pill after 3 months, thereafter 6 monthly. Follow up patient with IUCD, 6 weeks after insertion to check strings, thereafter yearly.
+```
+
+### `sa-ndoh-adult-primary-care:p0087:03d5d5b75ffc`
+*Hypertension: Routine Care > Treat the patient with hypertension* · pages 87–87 · table · adult · topics ['cardiovascular', 'maternal_reproductive', 'urinary_renal'] · 242 tokens
+
+```text
+|Step|Drugs all|once a day|Note|
+|---|---|---|---|
+|1|Starthydr|ochlorothiazide (HCTZ)12.5mg|Avoid in pregnancy (refer), liver or kidney disease, gout. Use enalapril first instead in diabetes, kidney disease, heart failure.|
+|2|Addenala|pril10mg|Avoid/stop in pregnancy, angioedema or renal artery stenosis: use amlodipine 5mg daily instead. If eGFR < 60 and/or peripheral vascular disease, check eGFR and potassium within 4 weeks of starting/changing dose.|
+|3|Addamlo|dipine5mg and increaseenalaprilto 20mg.|Avoid amlodipine in heart failure if possible.|
+|4|Addateno|lol 50mg; increase HCTZ to 25mg and amlodipine to 10mg.|Avoid atenolol in pregnancy, asthma, COPD, heart failure.Refer for specialist assessment if BP not controlled on step 4 treatment.|
+```
+
 ### `sa-ndoh-adult-primary-care:p0019:a7b5711948f8`
 *Headache > Migraine likely* · pages 19–19 · text · adult · topics ['neurological'] · 156 tokens
 
@@ -354,44 +420,4 @@ The GDG considered the very low certainty of evidence that using ultrasound-guid
 No
 
 Pain or pressure over forehead or cheek/s worse on bending forwards, recent common cold, runny nose?
-```
-
-### `sa-ndoh-adult-primary-care:p0101:10fca7222da6`
-*Chronic Arthritis: Routine Care > Treat the patient with chronic arthritis* · pages 101–101 · text · adult · topics ['musculoskeletal'] · 176 tokens
-
-```text
-- Refer to physiotherapist or occupational therapist if rheumatoid arthritis and/or difficulty with activities of daily living.
-- Give paracetamol 1g 6 hourly. If no response and inflammation is present in the patient with osteoarthritis, give ibuprofen 200-400mg 8 hourly after meals only as needed up to 1 month.
-- Give amitriptyline 25mg night, 10mg if patient > 65 years.
-- Rheumatoid arthritis must be treated early with disease modifying anti-rheumatic drugs to control symptoms, preserve function, and minimise further damage.
-- If inflammatory arthritis likely, start prednisone 7.5mg daily and refer for hospital outpatient appointment.
-
-Review monthly till symptoms controlled, then 3-6 monthly. Refer patient to a specialist if poor response to treatment
-```
-
-### `sa-ndoh-adult-primary-care:p0082:aabefe3a1fa8`
-*Cardiovascular Disease (CVD) Risk: Routine Care > Advise the patient with CVD risk* · pages 82–82 · text · adult · topics ['cardiovascular'] · 215 tokens
-
-```text
-- Discuss CVD risk: explore the patient’s understanding of CVD risk and the need for a change in lifestyle.
-- Invite patient to address 1 lifestyle CVD risk factor at a time: help plan how to fit the lifestyle change into his/her day. Explore what might hinder or support this. Together set reasonable target/s for next visit.
-- Identify support to maintain lifestyle change: health education officer or dietician/nutritionist, friend, partner or relative to attend clinic visits, a healthy lifestyle group, helpline
-
-111.
-
-- Be encouraging and congratulate any achievement. Avoid judging, criticising or blaming. It is the patient’s right to make decisions about his/her own health. For tips on communicating effectively
-
-preface.
-
-Treat the patient with CVD risk Give the patient with CVD risk > 20% simvastatin 10mg daily for life.
-
-> 1One drink is 1 tot of spirits, or 1 small glass (125mℓ) of wine or 1 can/bottle (330mℓ) of beer.
-```
-
-### `sa-ndoh-adult-primary-care:p0011:36ec34891678`
-*The Injured Patient > Approach to the injured patient not needing urgent attention* · pages 11–11 · warning · adult · topics ['adult_primary_care'] · 92 tokens
-
-```text
-- Refer same day if pregnant, known bleeding disorder, on anticoagulant, involved in high-speed collision, ejected from or hit by vehicle or fell > 3 metres.
-- If yes to ≥ 1 90: drinks alcohol every day, > 14 drinks /week, ≥ 5 drinks /session, loses control when drinking; used illegal drug or misused prescription or over-the-counter medication in past year. • If assault or abuse 56.
 ```

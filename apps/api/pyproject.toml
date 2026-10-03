@@ -78,5 +78,5 @@ plugins = ["pydantic.mypy"]
 exclude = ["tests/"]
 
 [[tool.mypy.overrides]]
-module = ["twilio.*", "pymupdf4llm.*", "pymupdf.*", "fitz.*"]
+module = ["twilio.*", "pymupdf4llm.*", "pymupdf.*", "fitz.*", "bm25s.*", "Stemmer.*"]
 ignore_missing_imports = true

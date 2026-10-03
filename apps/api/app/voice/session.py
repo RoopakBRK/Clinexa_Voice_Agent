@@ -1,20 +1,26 @@
-"""A single live phone call: Twilio audio in -> streaming STT -> caller utterances.
+"""A single live phone call: Twilio audio in -> STT -> reply (LLM -> TTS) -> Twilio.
 
 The WebSocket handler only parses Twilio frames and feeds audio here; STT runs
 in its own task so a slow provider never blocks frame reads. Audio is buffered
 in a bounded queue, which also preserves audio while STT reconnects.
+
+Each caller utterance is answered in a separate reply task: reply text streams
+from the LLM, is cut into sentences, and each sentence is synthesised and sent
+to Twilio while the rest is still being written.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel
 
+from app.agents.responder import ReplyError, ReplyGenerator
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.graph.state import AgentName, ConversationMessage, VoiceClinicalState
@@ -27,14 +33,33 @@ from app.voice.providers.base import (
     STTProvider,
     TranscriptEvent,
     TranscriptEventType,
+    TTSError,
+    TTSProvider,
 )
+from app.voice.sentences import SentenceChunker
 from app.voice.turns import Utterance, UtteranceAssembler
+from app.voice.twilio_protocol import outbound_mark, outbound_media
 
 log = get_logger(__name__)
 
 UtteranceHandler = Callable[["CallSession", Utterance], Awaitable[None]]
+# Sends one Twilio Media Streams frame (JSON text) to the caller's WebSocket.
+FrameSender = Callable[[str], Awaitable[None]]
 
 _STT_DRAIN_TIMEOUT_S = 6.0
+
+
+@dataclass
+class _ReplyTurn:
+    """Progress of one assistant reply, shared by its LLM and TTS halves."""
+
+    heard_at: float  # monotonic time the caller's utterance was complete
+    endpoint_latency_ms: float | None
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    sentences: list[str] = field(default_factory=list)
+    first_sentence_at: float | None = None
+    audio_started: bool = False
+    fallback: bool = False
 
 
 class CallStatus(StrEnum):
@@ -61,6 +86,7 @@ class CallSnapshot(BaseModel):
     audio_frames_received: int
     audio_frames_dropped: int
     stt_reconnects: int
+    replies_spoken: int
     latency: dict[str, LatencyStats]
 
 
@@ -75,6 +101,9 @@ class CallSession:
         caller: str | None = None,
         audio_format: AudioFormat = TWILIO_AUDIO_FORMAT,
         on_utterance: UtteranceHandler | None = None,
+        responder: ReplyGenerator | None = None,
+        tts: TTSProvider | None = None,
+        send: FrameSender | None = None,
     ) -> None:
         self.call_sid = call_sid
         self.stream_sid = stream_sid
@@ -89,6 +118,13 @@ class CallSession:
         self._stt = stt
         self._settings = settings
         self._on_utterance = on_utterance
+        # Replies need all three; without them the call is transcribed only.
+        self._responder = responder
+        self._tts = tts
+        self._send = send
+        self._reply_task: asyncio.Task[None] | None = None
+        self._reply_due: tuple[float, float | None] | None = None
+        self.replies_spoken = 0
         self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(
             maxsize=settings.audio_queue_max_frames
         )
@@ -107,7 +143,16 @@ class CallSession:
 
     def start(self) -> None:
         self._stt_task = asyncio.create_task(self._run_stt(), name=f"stt-{self.call_sid}")
-        log.info("call.started", caller=self.caller, stt_provider=self._stt.name)
+        log.info(
+            "call.started",
+            caller=self.caller,
+            stt_provider=self._stt.name,
+            replies_enabled=self.replies_enabled,
+        )
+
+    @property
+    def replies_enabled(self) -> bool:
+        return self._responder is not None and self._tts is not None and self._send is not None
 
     def feed_audio(self, chunk: bytes) -> None:
         if self._closed or self.status is CallStatus.STT_UNAVAILABLE:
@@ -132,6 +177,10 @@ class CallSession:
         await asyncio.shield(self._close_task)
 
     async def _finalize(self) -> None:
+        # The caller has gone: stop talking before flushing what they said last.
+        if self._reply_task is not None:
+            self._reply_task.cancel()
+            await asyncio.gather(self._reply_task, return_exceptions=True)
         self._enqueue_end_of_audio()
 
         if self._stt_task is not None:
@@ -159,7 +208,8 @@ class CallSession:
         )
 
     def on_mark(self, name: str) -> None:
-        # Phase 2/3: marks confirm when queued TTS audio finished playing.
+        # Twilio echoes a reply's mark once its audio has finished playing.
+        # Phase 3 uses this to know whether the assistant is still speaking.
         log.debug("call.mark", name=name)
 
     def snapshot(self) -> CallSnapshot:
@@ -180,6 +230,7 @@ class CallSession:
             audio_frames_received=self.frames_received,
             audio_frames_dropped=self.frames_dropped,
             stt_reconnects=self.stt_reconnects,
+            replies_spoken=self.replies_spoken,
             latency=self.metrics.summary(),
         )
 
@@ -264,3 +315,142 @@ class CallSession:
         )
         if self._on_utterance is not None:
             await self._on_utterance(self, utterance)
+        if self.replies_enabled and not self._closed:
+            self._request_reply(utterance)
+
+    # --- replies -----------------------------------------------------------
+
+    def _request_reply(self, utterance: Utterance) -> None:
+        # Replies are spoken one at a time. If the caller says more while one is
+        # being spoken, a single further reply covers everything said since.
+        self._reply_due = (time.monotonic(), utterance.endpoint_latency_ms)
+        if self._reply_task is None or self._reply_task.done():
+            self._reply_task = asyncio.create_task(
+                self._reply_loop(), name=f"reply-{self.call_sid}"
+            )
+
+    async def _reply_loop(self) -> None:
+        while (due := self._reply_due) is not None:
+            self._reply_due = None
+            try:
+                await self._reply(_ReplyTurn(heard_at=due[0], endpoint_latency_ms=due[1]))
+            except Exception:
+                log.exception("reply.failed")
+
+    async def _reply(self, turn: _ReplyTurn) -> None:
+        history = self.state.conversation_history
+        position = len(history)  # the reply belongs here even if the caller speaks during it
+        sentences: asyncio.Queue[str | None] = asyncio.Queue()
+        # The LLM runs in its own task so it is already generating while the TTS
+        # connection is being opened.
+        generator = asyncio.create_task(
+            self._generate(list(history), sentences, turn), name=f"llm-{self.call_sid}"
+        )
+        completed = False
+        try:
+            await self._speak(sentences, turn)
+            completed = True
+        except TTSError as exc:
+            log.error("reply.tts_failed", error=str(exc), audio_started=turn.audio_started)
+        finally:
+            generator.cancel()
+            await asyncio.gather(generator, return_exceptions=True)
+            # Only what the caller could actually hear goes into the transcript.
+            if turn.audio_started and turn.sentences:
+                text = " ".join(turn.sentences)
+                history.insert(
+                    position,
+                    ConversationMessage(
+                        role="assistant",
+                        content=text,
+                        timestamp=turn.started_at,
+                        interrupted=not completed,
+                    ),
+                )
+                self.state.response_text = text
+                self.replies_spoken += 1
+                log.info(
+                    "call.reply",
+                    text=text if self._settings.log_transcripts else "<redacted>",
+                    chars=len(text),
+                    sentences=len(turn.sentences),
+                    fallback=turn.fallback,
+                    interrupted=not completed,
+                )
+
+    async def _generate(
+        self,
+        history: list[ConversationMessage],
+        sentences: asyncio.Queue[str | None],
+        turn: _ReplyTurn,
+    ) -> None:
+        assert self._responder is not None
+        chunker = SentenceChunker()
+        started = time.monotonic()
+        first_text = True
+
+        def emit(sentence: str) -> None:
+            if turn.first_sentence_at is None:
+                turn.first_sentence_at = time.monotonic()
+                self.metrics.record("llm_first_sentence_ms", _ms_since(started))
+            turn.sentences.append(sentence)
+            sentences.put_nowait(sentence)
+
+        try:
+            async for delta in self._responder.stream_reply(history):
+                if first_text and delta:
+                    first_text = False
+                    self.metrics.record("llm_ttft_ms", _ms_since(started))
+                for sentence in chunker.feed(delta):
+                    emit(sentence)
+            if (rest := chunker.flush()) is not None:
+                emit(rest)
+            self.metrics.record("llm_total_ms", _ms_since(started))
+            if not turn.sentences:
+                raise ReplyError("model returned no text")
+        except ReplyError as exc:
+            log.error("reply.llm_failed", error=str(exc), sentences_spoken=len(turn.sentences))
+            # Never leave a caller in silence. A reply that already started is
+            # simply cut short; otherwise say that something went wrong.
+            if not turn.sentences:
+                turn.fallback = True
+                emit(self._settings.reply_fallback_text)
+        finally:
+            sentences.put_nowait(None)
+
+    async def _speak(self, sentences: asyncio.Queue[str | None], turn: _ReplyTurn) -> None:
+        assert self._tts is not None and self._send is not None
+
+        async def text() -> AsyncIterator[str]:
+            while (sentence := await sentences.get()) is not None:
+                yield sentence
+
+        audio = self._tts.synthesize_stream(text(), self.audio_format)
+        try:
+            async for chunk in audio:
+                if not turn.audio_started:
+                    turn.audio_started = True
+                    self._record_first_audio(turn)
+                await self._send(outbound_media(self.stream_sid, chunk))
+        finally:
+            # Hang-up cancels this task between chunks; close the provider stream now
+            # rather than whenever the generator is garbage-collected.
+            if isinstance(audio, AsyncGenerator):
+                await audio.aclose()
+        if turn.audio_started:
+            await self._send(outbound_mark(self.stream_sid, f"reply-{self.replies_spoken + 1}"))
+
+    def _record_first_audio(self, turn: _ReplyTurn) -> None:
+        now = time.monotonic()
+        response_ms = round((now - turn.heard_at) * 1000, 2)
+        self.metrics.record("response_latency_ms", response_ms)
+        if turn.first_sentence_at is not None:
+            self.metrics.record("tts_ttfa_ms", round((now - turn.first_sentence_at) * 1000, 2))
+        if turn.endpoint_latency_ms is not None:
+            self.metrics.record(
+                "voice_to_voice_ms", round(turn.endpoint_latency_ms + response_ms, 2)
+            )
+
+
+def _ms_since(start: float) -> float:
+    return round((time.monotonic() - start) * 1000, 2)

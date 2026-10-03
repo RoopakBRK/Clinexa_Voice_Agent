@@ -84,4 +84,6 @@ documents:
     publication_date: "2016"
     topics: [adult_primary_care]
     structure: caps_topics
-    skip_pages: [[1, 1]]  # cover
+    # cover; 'Communicating effectively' (clinician counselling tips, not medical evidence);
+    # chart fragments; p8 prescription form + prescribing advice. p7 (initial assessment) is kept.
+    skip_pages: [[1, 6], [8, 8]]

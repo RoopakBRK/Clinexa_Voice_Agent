@@ -75,8 +75,16 @@ class STTProvider(ABC):
         """
 
 
+class TTSError(Exception):
+    """Raised when speech synthesis fails; the reply cannot be spoken."""
+
+
+class TTSConnectionError(TTSError):
+    """Raised when a connection to the TTS provider cannot be established."""
+
+
 class TTSProvider(ABC):
-    """Streaming text-to-speech. Implemented in Phase 2."""
+    """Streaming text-to-speech."""
 
     name: str
 
@@ -84,4 +92,8 @@ class TTSProvider(ABC):
     def synthesize_stream(
         self, text: AsyncIterator[str], audio_format: AudioFormat
     ) -> AsyncIterator[bytes]:
-        """Yield encoded audio chunks as soon as each text chunk is synthesised."""
+        """Yield encoded audio chunks as soon as each text chunk is synthesised.
+
+        ``text`` yields speakable chunks (sentences). The stream ends once ``text``
+        is exhausted and all of its audio has been yielded. Raises ``TTSError``.
+        """

@@ -8,10 +8,17 @@ import structlog
 from fastapi import APIRouter, Depends, WebSocket
 from starlette.websockets import WebSocketState
 
+from app.agents.responder import ReplyGenerator
 from app.core.config import Settings
 from app.core.logging import get_logger
-from app.voice.deps import get_call_registry, get_settings, get_stt_provider
-from app.voice.providers.base import TWILIO_AUDIO_FORMAT, STTProvider
+from app.voice.deps import (
+    get_call_registry,
+    get_reply_generator,
+    get_settings,
+    get_stt_provider,
+    get_tts_provider,
+)
+from app.voice.providers.base import TWILIO_AUDIO_FORMAT, STTProvider, TTSProvider
 from app.voice.registry import CallRegistry
 from app.voice.security import STREAM_TOKEN_PARAM, verify_stream_token
 from app.voice.session import CallSession
@@ -41,6 +48,8 @@ async def media_stream(
     websocket: WebSocket,
     settings: Settings = Depends(get_settings),
     stt: STTProvider | None = Depends(get_stt_provider),
+    tts: TTSProvider | None = Depends(get_tts_provider),
+    responder: ReplyGenerator | None = Depends(get_reply_generator),
     registry: CallRegistry = Depends(get_call_registry),
 ) -> None:
     await websocket.accept()
@@ -52,7 +61,7 @@ async def media_stream(
                     if session is not None and msg.media.track == "inbound":
                         session.feed_audio(msg.audio())
                 case StartMessage() as msg if session is None:
-                    session = await _start_session(websocket, msg, settings, stt)
+                    session = await _start_session(websocket, msg, settings, stt, tts, responder)
                     if session is None:
                         return
                     registry.add(session)
@@ -88,6 +97,8 @@ async def _start_session(
     msg: StartMessage,
     settings: Settings,
     stt: STTProvider | None,
+    tts: TTSProvider | None,
+    responder: ReplyGenerator | None,
 ) -> CallSession | None:
     start = msg.start
     # Tasks created from here on inherit these, so all call logs are correlated.
@@ -118,4 +129,7 @@ async def _start_session(
         stt=stt,
         settings=settings,
         caller=start.custom_parameters.get(CALLER_PARAM),
+        responder=responder,
+        tts=tts,
+        send=websocket.send_text,
     )

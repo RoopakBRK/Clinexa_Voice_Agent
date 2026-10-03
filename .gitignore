@@ -114,3 +114,6 @@ ehthumbs.db
 # Knowledge base: per-page extraction cache (~13 MB, rebuilt by `make ingest`) and search indexes
 data/processed/extracted/
 data/indexes/
+
+# Local project map (personal notes; regenerate rather than commit)
+structure.md

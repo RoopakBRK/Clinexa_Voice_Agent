@@ -164,14 +164,14 @@ class QdrantChunkStore:
             limit=limit,
             with_payload=True,
         )
-        return [_to_retrieved(p) for p in response.points]
+        return [_to_retrieved(p, rank) for rank, p in enumerate(response.points, start=1)]
 
 
-def _to_retrieved(point: models.ScoredPoint) -> RetrievedChunk:
+def _to_retrieved(point: models.ScoredPoint, rank: int) -> RetrievedChunk:
     payload = point.payload or {}
     return RetrievedChunk(
         chunk_id=str(payload["chunk_id"]),
         text=str(payload["text"]),
         metadata=DocumentMetadata.model_validate(payload),
-        scores=RetrievalScores(dense_score=float(point.score)),
+        scores=RetrievalScores(dense_score=float(point.score), dense_rank=rank),
     )

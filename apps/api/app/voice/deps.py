@@ -9,7 +9,8 @@ from fastapi.requests import HTTPConnection
 from app.core.config import Settings
 
 if TYPE_CHECKING:
-    from app.voice.providers.base import STTProvider
+    from app.agents.responder import ReplyGenerator
+    from app.voice.providers.base import STTProvider, TTSProvider
     from app.voice.registry import CallRegistry
 
 
@@ -19,6 +20,14 @@ def get_settings(conn: HTTPConnection) -> Settings:
 
 def get_stt_provider(conn: HTTPConnection) -> STTProvider | None:
     return cast("STTProvider | None", conn.app.state.stt_provider)
+
+
+def get_tts_provider(conn: HTTPConnection) -> TTSProvider | None:
+    return cast("TTSProvider | None", conn.app.state.tts_provider)
+
+
+def get_reply_generator(conn: HTTPConnection) -> ReplyGenerator | None:
+    return cast("ReplyGenerator | None", conn.app.state.reply_generator)
 
 
 def get_call_registry(conn: HTTPConnection) -> CallRegistry:

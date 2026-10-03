@@ -1,0 +1,484 @@
+# Clinexa retrieval evaluation set, v1 (DRAFT: needs human review).
+#
+# Drafted by Claude from the knowledge base's own section headings and term searches
+# (NOT from the retriever's output, to avoid grading the system on what it already finds).
+#
+# HOW TO REVIEW A QUESTION
+#   question   Is it phrased the way a real caller would say it?
+#   gold       Is each "unit" a fact a good answer needs, and would the listed documents/sections
+#              really contain it? A chunk satisfies a unit if it matches ALL of: an accepted
+#              document, the page range, ONE of the section substrings, every `must_contain` term
+#              and at least one `any_of` term (case-insensitive). Lists mean "any of these".
+#   expected   answer  -> the knowledge base can answer it (needs gold)
+#              clarify -> too vague; a good assistant asks a question first (no gold)
+#              abstain -> not covered by the knowledge base; must not be answered (no gold)
+#   caller     age / pregnancy known to the system (drives population filters).
+#
+# Document ids:
+#   who-malaria-guidelines                     WHO guidelines for malaria (2026)
+#   who-mhgap-ig-v2                            WHO mhGAP Intervention Guide v2 (mental health)
+#   who-pocket-book-hospital-care-children     WHO Pocket book of hospital care for children
+#   who-euro-pocket-book-phc-children          WHO Europe Pocket book of primary health care, children
+#   who-bsi-cvc-guidelines                     WHO catheter-related bloodstream infection prevention
+#   sa-ndoh-adult-primary-care                 South African Adult Primary Care guide (NOT WHO)
+
+name: clinexa-retrieval-eval
+version: "1-draft"
+
+questions:
+  # ------------------------------------------------------------------ symptom
+  - id: sym-01-child-cough-fast-breathing
+    category: symptom
+    question: "My little boy has had a cough for five days and he's breathing really fast."
+    caller: {age: 4}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: ["Child presenting with cough", "Pneumonia", "Cough or difficulty in breathing"]
+        must_contain: ["fast breathing"]
+        note: Assessment of a child with cough and fast breathing (pneumonia signs).
+
+  - id: sym-02-baby-fever-rash
+    category: symptom
+    question: "My baby has a high temperature and some spots on her skin."
+    caller: {age: 1}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: ["Child presenting with fever", "6.3 Fever"]
+        any_of: ["rash", "non-blanching", "petechi", "purpur", "meningococc"]
+        note: Approach to a febrile child with a rash (incl. meningococcal rash red flag).
+
+  - id: sym-03-child-diarrhoea-vomiting
+    category: symptom
+    question: "My son has had watery poo all day and he keeps being sick."
+    caller: {age: 5}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: ["5.2 Acute diarrhoea", "6.4 Diarrhoea"]
+        must_contain: ["dehydration"]
+        note: Assessment of dehydration in a child with diarrhoea.
+
+  - id: sym-04-adult-headache
+    category: symptom
+    question: "I've had a headache for three days and it won't go away."
+    caller: {age: 35}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Headache"
+        note: Adult headache approach.
+
+  - id: sym-05-adult-chest-pain
+    category: symptom
+    question: "I get a tight pain in my chest when I walk up the stairs."
+    caller: {age: 58}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Chest Pain"
+
+  - id: sym-06-adult-weight-loss
+    category: symptom
+    question: "I've been losing weight and I'm not trying to."
+    caller: {age: 45}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Weight Loss"
+
+  - id: sym-07-adult-dizzy
+    category: symptom
+    question: "I feel dizzy every time I stand up."
+    caller: {age: 62}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Dizziness"
+
+  - id: sym-08-adult-vomiting-abdominal-pain
+    category: symptom
+    question: "I've been throwing up since last night and my stomach really hurts."
+    caller: {age: 40}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: ["Vomiting", "Abdominal Pain"]
+
+  - id: sym-09-adult-itchy-rash
+    category: symptom
+    question: "I'm itching all over and I've come out in a rash."
+    caller: {age: 30}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: ["Itchy Rash", "Itch with", "Itch"]
+
+  - id: sym-10-adult-burning-urine
+    category: symptom
+    question: "It burns when I pee and I need to go all the time."
+    caller: {age: 28}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Urinary Symptoms"
+
+  - id: sym-11-child-sore-throat-ear
+    category: symptom
+    question: "My daughter says her throat hurts and she keeps pulling at her ear."
+    caller: {age: 6}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: ["Ear, nose", "throat", "ear infection", "otitis"]
+
+  # ---------------------------------------------------------------- condition
+  - id: con-01-child-pneumonia
+    category: condition
+    question: "How is pneumonia in a child diagnosed and treated?"
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: "Pneumonia"
+        any_of: ["fast breathing", "chest indrawing", "antibiotic"]
+
+  - id: con-02-adult-asthma
+    category: condition
+    question: "What is asthma and how do you manage it in an adult?"
+    caller: {age: 40}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Asthma"
+
+  - id: con-03-uncomplicated-malaria
+    category: condition
+    question: "What is the recommended treatment for uncomplicated malaria?"
+    gold:
+      - document_id: who-malaria-guidelines
+        must_contain: ["uncomplicated"]
+        any_of: ["should be treated with one of the following ACTs", "artemisinin-based combination therapy"]
+        note: First-line ACT treatment recommendation.
+
+  - id: con-04-severe-malaria
+    category: condition
+    question: "How should severe malaria be treated?"
+    gold:
+      - document_id: who-malaria-guidelines
+        section_contains: "Treating severe malaria"
+        must_contain: ["artesunate"]
+
+  - id: con-05-depression
+    category: condition
+    question: "How is depression managed in primary care?"
+    gold:
+      - document_id: who-mhgap-ig-v2
+        section_contains: "Depression"
+        any_of: ["psychoeducation", "antidepressant", "behavioural activation", "psychological"]
+
+  - id: con-06-epilepsy
+    category: condition
+    question: "What should be done for a person with epilepsy?"
+    gold:
+      - document_id: who-mhgap-ig-v2
+        section_contains: "Epilepsy"
+
+  - id: con-07-hypertension
+    category: condition
+    question: "How do you diagnose and manage high blood pressure?"
+    caller: {age: 55}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Hypertension"
+
+  - id: con-08-diabetes
+    category: condition
+    question: "How is diabetes looked after in routine care?"
+    caller: {age: 50}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Diabetes"
+
+  - id: con-09-catheter-infection
+    category: condition
+    question: "How can bloodstream infections from central venous catheters be prevented?"
+    gold:
+      - document_id: who-bsi-cvc-guidelines
+        section_contains: "Recommendations"
+        must_contain: ["chlorhexidine"]
+
+  - id: con-10-child-tb
+    category: condition
+    question: "How is tuberculosis in a child treated?"
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: "Tuberculosis"
+
+  # ----------------------------------------------------------------- red flag
+  - id: red-01-meningitis-signs
+    category: red_flag
+    question: "My toddler has a fever and now her neck is stiff and she's really sleepy."
+    caller: {age: 2}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: "Meningitis"
+
+  - id: red-02-newborn-danger-signs
+    category: red_flag
+    question: "My newborn is floppy and won't feed."
+    caller: {age: 0}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: ["Danger signs", "sick newborn", "sick neonates", "young infant"]
+
+  - id: red-03-cardiac-chest-pain
+    category: red_flag
+    question: "I have crushing chest pain going into my left arm and I'm sweating."
+    caller: {age: 60}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: ["Chest Pain", "Ischaemic Heart Disease"]
+        any_of: ["urgent", "refer"]
+
+  - id: red-04-stroke-signs
+    category: red_flag
+    question: "My face has dropped on one side and my arm suddenly feels weak."
+    caller: {age: 66}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: ["Face Symptoms", "Stroke"]
+        any_of: ["stroke", "TIA"]
+
+  - id: red-05-suicidal-thoughts
+    category: red_flag
+    question: "I've been thinking about ending my life."
+    caller: {age: 30}
+    gold:
+      - document_id: [sa-ndoh-adult-primary-care, who-mhgap-ig-v2]
+        section_contains: ["Suicidal Patient", "Self-harm"]
+
+  - id: red-06-child-seizure
+    category: red_flag
+    question: "My child is having a fit and it's not stopping."
+    caller: {age: 3}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: ["Convulsions or fits", "Lethargy – coma – convulsions", "status epilepticus"]
+
+  - id: red-07-fever-confusion
+    category: red_flag
+    question: "I have a high fever and I'm confused and breathing very fast."
+    caller: {age: 45}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: ["Fever", "Confused Patient"]
+        any_of: ["urgent", "refer"]
+
+  - id: red-08-malaria-drowsy-fitting
+    category: red_flag
+    question: "Someone with malaria has become very drowsy and had a convulsion."
+    gold:
+      - document_id: who-malaria-guidelines
+        section_contains: "severe malaria"
+        any_of: ["coma", "convulsion", "impaired consciousness", "prostration"]
+
+  # --------------------------------------------------------------- medication
+  - id: med-01-al-dose-child
+    category: medication
+    question: "What dose of artemether-lumefantrine does a 15 kilo child need?"
+    caller: {age: 4}
+    gold:
+      - document_id: who-malaria-guidelines
+        section_contains: "Dosing of ACTs"
+        must_contain: ["lumefantrine"]
+
+  - id: med-02-ors-amount
+    category: medication
+    question: "How much oral rehydration solution should I give my child who is a bit dehydrated?"
+    caller: {age: 3}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: ["Some dehydration", "Treat some dehydration"]
+        must_contain: ["ORS"]
+        note: Plan B (some dehydration) is the one that matches "a bit dehydrated".
+
+  - id: med-03-primaquine-g6pd
+    category: medication
+    question: "Is primaquine safe for someone with G6PD deficiency?"
+    gold:
+      - document_id: who-malaria-guidelines
+        must_contain: ["primaquine", "G6PD"]
+        any_of: ["deficien"]
+        section_contains: ["G6PD", "anti-relapse", "primaquine", "radical cure"]
+
+  - id: med-04-pneumonia-antibiotic
+    category: medication
+    question: "Which antibiotic is used for pneumonia in a child and how much?"
+    caller: {age: 3}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: "Pneumonia"
+        must_contain: ["amoxicillin"]
+
+  - id: med-05-antimalarial-pregnancy
+    category: medication
+    question: "Can I take malaria medicine while I'm pregnant?"
+    caller: {age: 28, pregnancy_status: pregnant}
+    gold:
+      - document_id: who-malaria-guidelines
+        section_contains: ["Pregnant and lactating women"]
+        any_of: ["artemether", "ACT", "antimalarial", "quinine", "artesunate"]
+
+  - id: med-06-antidepressants
+    category: medication
+    question: "What antidepressants are recommended and at what doses?"
+    gold:
+      - document_id: who-mhgap-ig-v2
+        section_contains: "Antidepressants"
+
+  - id: med-07-antiepileptics
+    category: medication
+    question: "Which anti-seizure medicines are used for epilepsy and what are the cautions?"
+    gold:
+      - document_id: who-mhgap-ig-v2
+        section_contains: "Antiepileptic"
+
+  - id: med-08-paracetamol-child
+    category: medication
+    question: "How much paracetamol can I give my child for a fever?"
+    caller: {age: 4}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: ["Annex"]
+        must_contain: ["paracetamol"]
+        note: >
+          HARD CASE. Paediatric paracetamol doses live in the drug-dosage annex tables, which extract
+          poorly from the PDFs (garbled cells). The test is deliberately kept: it measures a real weakness.
+
+  # ---------------------------------------------------------------- follow-up
+  # `retrieval_query` is the self-contained question a query rewriter should produce.
+  - id: fol-01-antibiotic-duration
+    category: follow_up
+    history: ["My son has had a cough and fast breathing for five days.", "He's three."]
+    question: "And how long should he take the antibiotic for?"
+    retrieval_query: "How many days should a child with pneumonia take amoxicillin?"
+    caller: {age: 3}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        section_contains: "Pneumonia"
+        must_contain: ["amoxicillin"]
+
+  - id: fol-02-sugar-target
+    category: follow_up
+    history: ["I've got diabetes."]
+    question: "What should my sugar level be?"
+    retrieval_query: "What blood glucose and HbA1c targets should an adult with diabetes aim for?"
+    caller: {age: 50}
+    gold:
+      - document_id: sa-ndoh-adult-primary-care
+        section_contains: "Diabetes"
+        any_of: ["HbA1c", "glucose"]
+
+  - id: fol-03-make-rehydration-drink
+    category: follow_up
+    history: ["My daughter has diarrhoea and keeps vomiting."]
+    question: "How do I make the rehydration drink?"
+    retrieval_query: "How to prepare and give oral rehydration solution to a child with diarrhoea"
+    caller: {age: 4}
+    gold:
+      - document_id: [who-pocket-book-hospital-care-children, who-euro-pocket-book-phc-children]
+        must_contain: ["ORS"]
+        any_of: ["litre", "prepare", "mix"]
+
+  - id: fol-04-malaria-tablet-days
+    category: follow_up
+    history: ["The clinic told me I have malaria and gave me tablets."]
+    question: "How many days do I take them?"
+    retrieval_query: "How many days is artemether-lumefantrine given for uncomplicated malaria?"
+    gold:
+      - document_id: who-malaria-guidelines
+        must_contain: ["lumefantrine"]
+        any_of: ["3 days", "three days", "6 doses", "six doses"]
+
+  - id: fol-05-self-harm-risk
+    category: follow_up
+    history: ["I've been feeling very low for weeks."]
+    question: "Should I be worried I might hurt myself?"
+    retrieval_query: "How to assess the risk of self-harm or suicide in a person with depression"
+    caller: {age: 30}
+    gold:
+      - document_id: [who-mhgap-ig-v2, sa-ndoh-adult-primary-care]
+        section_contains: ["Self-harm", "Suicidal"]
+
+  # ---------------------------------------------------------------- ambiguous
+  - id: amb-01-unwell
+    category: ambiguous
+    question: "I just don't feel right."
+    expected: clarify
+    rationale: No symptom, age or duration; the assistant should ask what is wrong.
+
+  - id: amb-02-it-hurts
+    category: ambiguous
+    question: "It hurts a lot."
+    expected: clarify
+    rationale: No body location or cause.
+
+  - id: amb-03-whats-wrong
+    category: ambiguous
+    question: "Can you tell me what's wrong with me?"
+    expected: clarify
+    rationale: Asks for a diagnosis with no information; must also not diagnose.
+
+  - id: amb-04-tablets
+    category: ambiguous
+    question: "I need to know about my tablets."
+    expected: clarify
+    rationale: Which medicine? Unknown.
+
+  - id: amb-05-something-wrong
+    category: ambiguous
+    question: "Something is wrong."
+    expected: clarify
+
+  # ------------------------------------------------------------ out of domain
+  - id: ood-01-pizza
+    category: out_of_domain
+    question: "What's the best topping to put on a pizza?"
+    expected: abstain
+
+  - id: ood-02-tax
+    category: out_of_domain
+    question: "How do I fill in my income tax return?"
+    expected: abstain
+
+  - id: ood-03-lawyer
+    category: out_of_domain
+    question: "Can you recommend a good divorce lawyer?"
+    expected: abstain
+
+  - id: ood-04-capital
+    category: out_of_domain
+    question: "What is the capital of France?"
+    expected: abstain
+
+  - id: ood-05-dog-fleas
+    category: out_of_domain
+    question: "How do I get rid of fleas on my dog?"
+    expected: abstain
+    rationale: Sounds medical but is veterinary. Not covered.
+
+  - id: ood-06-lung-cancer-chemo
+    category: out_of_domain
+    question: "Which chemotherapy drugs are used for stage four lung cancer?"
+    expected: abstain
+    rationale: HARD NEGATIVE. The words "chemotherapy"/"cancer" appear in the corpus (malaria preventive chemotherapy), but oncology treatment is not covered.
+
+  - id: ood-07-knee-replacement
+    category: out_of_domain
+    question: "How long does it take to recover from knee replacement surgery?"
+    expected: abstain
+    rationale: Medical, but surgical recovery is not in the knowledge base.
+
+  - id: ood-08-poem
+    category: out_of_domain
+    question: "Write me a poem about the sea."
+    expected: abstain
+
+  - id: ood-09-tyre
+    category: out_of_domain
+    question: "How do I fix a flat tyre?"
+    expected: abstain
+
+  - id: ood-10-dental-implant
+    category: out_of_domain
+    question: "How much does a dental implant cost and how is it fitted?"
+    expected: abstain
+    rationale: Medical-adjacent, not covered.

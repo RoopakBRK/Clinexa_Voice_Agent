@@ -34,8 +34,14 @@ class LatencyMetrics:
     """Collects latency samples (in milliseconds) keyed by metric name.
 
     Metric names used by the pipeline:
-      stt_finalization_ms  audio sent -> final transcript received
-      stt_endpoint_ms      caller's last word -> end-of-utterance detected
+      stt_finalization_ms     audio sent -> final transcript received
+      stt_endpoint_ms         caller's last word -> end-of-utterance detected
+      llm_ttft_ms             reply requested -> first text from the LLM
+      llm_first_sentence_ms   reply requested -> first complete sentence
+      llm_total_ms            reply requested -> full reply text
+      tts_ttfa_ms             first sentence ready -> first audio from TTS
+      response_latency_ms     end-of-utterance detected -> first reply audio sent to Twilio
+      voice_to_voice_ms       caller's last word -> first reply audio sent to Twilio
     """
 
     def __init__(self) -> None:

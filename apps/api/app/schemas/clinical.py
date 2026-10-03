@@ -106,6 +106,10 @@ class RetrievalScores(BaseModel):
     bm25_score: float | None = None
     rrf_score: float | None = None
     reranker_score: float | None = None
+    # 1-based rank within each stage's own result list (None if absent from that list).
+    dense_rank: int | None = None
+    bm25_rank: int | None = None
+    reranker_rank: int | None = None
 
 
 class RetrievedChunk(BaseModel):

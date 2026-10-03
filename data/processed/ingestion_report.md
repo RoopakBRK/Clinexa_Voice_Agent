@@ -1,6 +1,6 @@
 # Ingestion report
 
-Tokenizer: `BAAI/bge-small-en-v1.5` · target 350 tokens/chunk · 4821 chunks (4217 retrievable) · 10s
+Tokenizer: `BAAI/bge-small-en-v1.5` · target 350 tokens/chunk · 4794 chunks (4201 retrievable) · 9s
 
 | Document | Pages | Sections | Chunks | Retrievable | Tokens p50 / p95 / max | Types |
 |---|---|---|---|---|---|---|
@@ -9,7 +9,7 @@ Tokenizer: `BAAI/bge-small-en-v1.5` · target 350 tokens/chunk · 4821 chunks (4
 | `who-pocket-book-hospital-care-children` | 438 | 358 | 764 | 684 | 275 / 350 / 401 | table 211, text 497, warning 56 |
 | `who-euro-pocket-book-phc-children` | 940 | 509 | 1285 | 1110 | 273 / 355 / 405 | table 287, text 823, warning 175 |
 | `who-bsi-cvc-guidelines` | 152 | 96 | 405 | 182 | 292 / 348 / 407 | recommendation 55, table 40, text 310 |
-| `sa-ndoh-adult-primary-care` | 117 | 225 | 357 | 346 | 247 / 350 / 392 | table 87, text 177, warning 93 |
+| `sa-ndoh-adult-primary-care` | 111 | 203 | 330 | 330 | 255 / 350 / 392 | table 80, text 157, warning 93 |
 
 ## Topics and populations
 
@@ -18,4 +18,4 @@ Tokenizer: `BAAI/bge-small-en-v1.5` · target 350 tokens/chunk · 4821 chunks (4
 - **who-pocket-book-hospital-care-children** — topics {'infectious_disease': 168, 'child_health': 132, 'emergency': 80, 'respiratory': 77, 'medication': 69}; populations {'child': 764}
 - **who-euro-pocket-book-phc-children** — topics {'child_health': 170, 'infectious_disease': 159, 'neonatal': 103, 'nutrition': 100, 'respiratory': 85}; populations {'child': 1285}
 - **who-bsi-cvc-guidelines** — topics {'infection_prevention': 334, 'infectious_disease': 63, 'skin': 4, 'neonatal': 3, 'substance_use': 1}; populations {'all': 405}
-- **sa-ndoh-adult-primary-care** — topics {'infectious_disease': 85, 'maternal_reproductive': 48, 'adult_primary_care': 38, 'cardiovascular': 27, 'mental_health': 26}; populations {'adult': 357}
+- **sa-ndoh-adult-primary-care** — topics {'infectious_disease': 82, 'maternal_reproductive': 46, 'skin': 26, 'cardiovascular': 26, 'mental_health': 24}; populations {'adult': 330}

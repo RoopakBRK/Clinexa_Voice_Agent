@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from app.core.config import Settings
 from app.core.logging import get_logger
-from app.voice.providers.base import STTProvider
+from app.voice.providers.base import STTProvider, TTSProvider
 from app.voice.providers.deepgram_stt import DeepgramSTTProvider
+from app.voice.providers.deepgram_tts import DeepgramTTSProvider
 
 log = get_logger(__name__)
 
@@ -20,4 +21,15 @@ def build_stt_provider(settings: Settings) -> STTProvider | None:
         endpointing_ms=settings.deepgram_endpointing_ms,
         utterance_end_ms=settings.deepgram_utterance_end_ms,
         keyterms=settings.deepgram_keyterms,
+    )
+
+
+def build_tts_provider(settings: Settings) -> TTSProvider | None:
+    if settings.deepgram_api_key is None:
+        log.warning("tts.not_configured", hint="set DEEPGRAM_API_KEY")
+        return None
+    return DeepgramTTSProvider(
+        settings.deepgram_api_key.get_secret_value(),
+        url=settings.deepgram_tts_url,
+        model=settings.deepgram_tts_model,
     )

@@ -5,7 +5,9 @@ It exercises the real flow end to end:
   2. Read the <Stream> URL + per-call token from the returned TwiML
   3. Open the Media Stream WebSocket and send connected/start/media/stop frames
      in real time (20 ms μ-law frames), just like Twilio
-  4. Print the transcript and latency the API recorded for the call
+  4. Stay on the line (sending silence) until the assistant's reply has been
+     received, echoing its mark back the way Twilio does after playback
+  5. Print the transcript and latency the API recorded for the call
 
 Audio input (pick one):
   --text "I've had a cough for five days"   synthesised with macOS `say`
@@ -14,12 +16,14 @@ Audio input (pick one):
 
 Usage (from repo root, API running on :8000):
   uv run --project apps/api python scripts/simulate_call.py --text "I have a headache"
+  ... --save-reply reply.wav      also write the assistant's speech to a WAV file
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import subprocess
 import sys
@@ -32,11 +36,11 @@ from pathlib import Path
 
 import httpx2 as httpx
 from twilio.request_validator import RequestValidator
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
 
 from app.core.config import Settings
-from app.voice.audio import MULAW_SILENCE, pcm16_to_mulaw
-from app.voice.twilio_protocol import outbound_media
+from app.voice.audio import MULAW_SILENCE, mulaw_to_pcm16, pcm16_to_mulaw
+from app.voice.twilio_protocol import outbound_mark, outbound_media
 
 FRAME_BYTES = 160  # 20 ms at 8 kHz μ-law
 TRAILING_SILENCE_S = 2.0  # lets endpointing fire before hang-up, as on a real call
@@ -63,6 +67,36 @@ def load_audio(args: argparse.Namespace) -> bytes:
         return pcm16_to_mulaw(w.readframes(w.getnframes()))
 
 
+class ReplyListener:
+    """The caller's ear: collects the audio the API sends back over the stream."""
+
+    def __init__(self) -> None:
+        self.audio = bytearray()
+        self.first_audio_at: float | None = None
+        self.finished = asyncio.Event()  # set when a reply's mark arrives
+
+    async def run(self, ws: ClientConnection, stream_sid: str) -> None:
+        async for raw in ws:
+            message = json.loads(raw)
+            if message["event"] == "media":
+                if self.first_audio_at is None:
+                    self.first_audio_at = time.monotonic()
+                self.audio.extend(base64.b64decode(message["media"]["payload"]))
+            elif message["event"] == "mark":
+                # Twilio echoes a mark once the audio queued before it has played.
+                played_at = (self.first_audio_at or time.monotonic()) + len(self.audio) / 8000
+                await asyncio.sleep(max(0.0, played_at - time.monotonic()))
+                await ws.send(outbound_mark(stream_sid, message["mark"]["name"]))
+                self.finished.set()
+
+    def save(self, path: str) -> None:
+        with wave.open(path, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(8000)
+            w.writeframes(mulaw_to_pcm16(bytes(self.audio)))
+
+
 def signed_headers(settings: Settings, url: str, params: dict[str, str]) -> dict[str, str]:
     if settings.twilio_auth_token is None:
         return {}
@@ -72,7 +106,8 @@ def signed_headers(settings: Settings, url: str, params: dict[str, str]) -> dict
 
 async def simulate(args: argparse.Namespace) -> None:
     settings = Settings()
-    audio = load_audio(args) + MULAW_SILENCE * int(8000 * TRAILING_SILENCE_S)
+    speech = load_audio(args)
+    audio = speech + MULAW_SILENCE * int(8000 * TRAILING_SILENCE_S)
     call_sid = f"CAsim{uuid.uuid4().hex[:28]}"
     stream_sid = f"MZsim{uuid.uuid4().hex[:28]}"
     form = {
@@ -121,14 +156,32 @@ async def simulate(args: argparse.Namespace) -> None:
                     }
                 )
             )
+            listener = ReplyListener()
+            listening = asyncio.create_task(listener.run(ws, stream_sid))
+            replies_expected = (await http.get("/health")).json().get("llm", {}).get("configured")
             t0 = time.monotonic()
-            for i, offset in enumerate(range(0, len(audio), FRAME_BYTES)):
-                frame = audio[offset : offset + FRAME_BYTES]
+            silence = MULAW_SILENCE * FRAME_BYTES
+            i = 0
+            # Send the caller's speech, then stay on the line in silence until the
+            # reply has finished playing (or --wait seconds have passed).
+            while True:
+                offset = i * FRAME_BYTES
+                if offset < len(audio):
+                    frame = audio[offset : offset + FRAME_BYTES]
+                elif not replies_expected or listener.finished.is_set():
+                    break
+                elif offset > len(audio) + args.wait * 8000:
+                    print(f"no complete reply within {args.wait:.0f}s of the caller's speech")
+                    break
+                else:
+                    frame = silence
                 message = json.loads(outbound_media(stream_sid, frame))
                 message["media"] |= {"track": "inbound", "chunk": str(i + 1)}
                 await ws.send(json.dumps(message))
+                i += 1
                 # Pace like a real call: frame i is due at i * 20 ms.
-                await asyncio.sleep(max(0.0, t0 + (i + 1) * 0.02 - time.monotonic()))
+                await asyncio.sleep(max(0.0, t0 + i * 0.02 - time.monotonic()))
+            listening.cancel()
             await ws.send(
                 json.dumps(
                     {"event": "stop", "streamSid": stream_sid, "stop": {"callSid": call_sid}}
@@ -144,6 +197,15 @@ async def simulate(args: argparse.Namespace) -> None:
     print("\ntranscript:")
     for msg in call["transcript"]:
         print(f"  [{msg['role']}] {msg['content']}  (confidence={msg['stt_confidence']})")
+    if listener.first_audio_at is not None:
+        speech_end = t0 + len(speech) / 8000
+        print(
+            f"\nreply audio: {len(listener.audio) / 8000:.1f}s, first audio "
+            f"{(listener.first_audio_at - speech_end) * 1000:.0f} ms after the caller stopped speaking"
+        )
+        if args.save_reply:
+            listener.save(args.save_reply)
+            print(f"  saved to {args.save_reply}")
     print("\nlatency:")
     for name, stats in call["latency"].items():
         print(f"  {name}: n={stats['count']} p50={stats['p50_ms']}ms p95={stats['p95_ms']}ms")
@@ -158,6 +220,10 @@ def main() -> None:
     source.add_argument("--wav", help="8 kHz mono 16-bit PCM WAV file")
     source.add_argument("--ulaw", help="raw 8 kHz μ-law file")
     parser.add_argument("--api", default="http://localhost:8000", help="API base URL")
+    parser.add_argument(
+        "--wait", type=float, default=20.0, help="max seconds to wait for the assistant's reply"
+    )
+    parser.add_argument("--save-reply", metavar="WAV", help="write the assistant's speech here")
     asyncio.run(simulate(parser.parse_args()))
 
 

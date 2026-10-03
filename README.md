@@ -23,7 +23,8 @@ Full design with diagrams: **[docs/architecture.md](docs/architecture.md)**
 | 1 | Twilio → WebSocket → Deepgram streaming STT | ✅ done |
 | 5 | WHO document ingestion & chunking → `data/processed/chunks.jsonl` | ✅ done |
 | 6 | Local embeddings (bge-small) + Qdrant dense retrieval with metadata filters | ✅ done (validated on the embedded index; Cloud pending) |
-| 7–8 | BM25 + RRF hybrid · cross-encoder reranking | ⏳ next |
+| 7 | BM25 + reciprocal rank fusion hybrid retrieval, clinical metadata filters | ✅ done |
+| 8 | Cross-encoder reranking + retrieval evaluation harness | ✅ built; question set is a **draft awaiting human review** |
 | 2 | STT → LLM → streaming TTS → Twilio | |
 | 3 | Streaming, endpointing, barge-in | |
 | 4 | LangGraph state machine | |
@@ -125,6 +126,62 @@ uv run --project apps/api python -m app.rag.retrieval query "fever" --population
   references and front matter can never be returned. Payload indexes are created on Qdrant Cloud.
 - **Backend selection:** `QDRANT_URL` set → Qdrant Cloud/server; unset (or `--local`) → the
   embedded local index. If the cluster is unreachable the CLI says so; it never falls back silently.
+
+## Hybrid retrieval (Phase 7)
+
+```
+query ─┬─▶ dense: embed + Qdrant ─ top 15 ─┐
+       │                                    ├─▶ RRF (k=60) ─▶ top 20 candidates ─▶ (cross-encoder: Phase 8)
+       └─▶ BM25 (stemmed, in-memory) ─ top 15 ┘
+              same metadata filter on both legs; legs run concurrently
+```
+
+```bash
+make query Q="artemether lumefantrine dose" ARGS="--local"      # hybrid (default)
+uv run --project apps/api python -m app.rag.retrieval --local query "cough" --mode bm25
+uv run --project apps/api python -m app.rag.retrieval --local query "cough" --mode dense --population adult
+```
+
+- **Why both legs:** dense search matches meaning ("tummy hurts" ≈ abdominal pain) but can blur exact
+  clinical terms; BM25 matches those exactly (drug names, "G6PD", doses). Section titles are part of
+  the BM25 text, so a query for "headache" finds the Headache section.
+- **`reciprocal_rank_fusion`** is explicit and unit-tested against hand-computed scores. It fuses
+  by rank, so cosine similarity and BM25 scores never need calibrating against each other. Every
+  candidate keeps `dense_score/rank`, `bm25_score/rank` and `rrf_score` for observability.
+- **Filters are identical on both legs** (`RetrievalFilters.matches` for BM25, `to_qdrant` for
+  Qdrant; a test proves they select the same chunks). `filters_from_clinical` derives them from what
+  the caller has said: age → population (`child`/`adult`, plus `pregnancy`; unknown age → no
+  restriction), complaint words → topic hints.
+- **Population is a safety constraint, topic is a hint.** If a strict filter leaves fewer than 5
+  candidates, the topic filter is dropped and the result is flagged `filter_relaxed`, but population is
+  never dropped, so an adult is never answered from paediatric dosing.
+- **Per-stage latency** (`dense_ms`, `bm25_ms`, `rrf_ms`, `total_ms`) is returned and logged. On a
+  laptop, dense ≈ 30 ms (including the query embedding), BM25 ≈ 1–2 ms, RRF ≈ 0.1 ms.
+- The retriever accepts a separate `sparse_query`, so the query rewriter (Phase 9) can give BM25 a clean
+  keyword form while the dense leg keeps the patient's natural wording.
+
+## Reranking and retrieval evaluation (Phase 8)
+
+```bash
+python -m app.rag.evaluation validate                       # check every gold criterion against the corpus
+python -m app.rag.evaluation retrieval --local \
+    --rerankers cross-encoder/ms-marco-MiniLM-L-6-v2 BAAI/bge-reranker-base   # writes evaluation/reports/
+```
+
+- **Cross-encoder reranker** (`app/rag/reranking`): re-scores the 20 fused candidates by reading query and
+  passage together, keeps every earlier-stage score, adds `reranker_score`/`reranker_rank`. The model
+  is a setting (`RERANKER_MODEL`); default `ms-marco-MiniLM-L-6-v2` for latency.
+- **Context compression** keeps the query-relevant sentences of each chunk. Caution and referral
+  sentences ("do not…", "refer urgently…") are always kept *on top of* the budget, so an irrelevant caution can
+  never push out the sentence that answers the question. Implemented and tested; not yet wired into the
+  pipeline until faithfulness evaluation (Phase 12) shows it is safe.
+- **Evaluation harness** (`app/rag/evaluation`): gold evidence is defined by *criteria* (document +
+  section/pages + key terms), not chunk ids, so it survives re-chunking. It compares vector-only, BM25-only,
+  hybrid, vector + rerank and hybrid + rerank, and reports Hit@k, evidence recall, MRR, NDCG, per-category results,
+  latency, paired bootstrap confidence intervals, a "does BM25 help?" ablation, a metadata-filter ablation,
+  and an abstention-signal analysis.
+- The 57-question set (`evaluation/datasets/retrieval_eval_v1.yaml`, 42 answerable) is a **draft**: reports
+  say so until a human has reviewed it (`evaluation/datasets/REVIEW_NOTES.md`). Do not quote its numbers.
 
 ## Repository layout
 

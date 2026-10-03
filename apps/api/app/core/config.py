@@ -61,6 +61,23 @@ class Settings(BaseSettings):
     # Domain terms to boost recognition (Nova-3 keyterm prompting).
     deepgram_keyterms: list[str] = Field(default_factory=list)
 
+    # --- Deepgram (TTS) ----------------------------------------------------
+    deepgram_tts_url: str = "wss://api.deepgram.com/v1/speak"
+    deepgram_tts_model: str = "aura-2-thalia-en"
+
+    # --- LLM (Anthropic Claude) ----------------------------------------------
+    anthropic_api_key: SecretStr | None = None
+    anthropic_model: str = "claude-opus-5-5"
+    # Thinking depth; low keeps time-to-first-token short for spoken replies.
+    # Blank = not sent, for models that reject the parameter (e.g. claude-haiku-4-5).
+    llm_effort: Literal["low", "medium", "high"] | None = "low"
+    # Re-run a request declined by a safety classifier on Anthropic's recommended
+    # fallback model, server-side. Turn off for models that do not support it.
+    llm_refusal_fallback: bool = True
+    # Includes thinking tokens; spoken replies themselves are a few sentences.
+    llm_max_tokens: int = Field(default=2048, ge=256)
+    llm_timeout_s: float = Field(default=20.0, gt=0)
+
     # --- Voice session -----------------------------------------------------
     stt_max_reconnect_attempts: int = Field(default=3, ge=0)
     audio_queue_max_frames: int = Field(default=1500, ge=50)  # ~30 s of 20 ms frames
@@ -79,6 +96,11 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=32, ge=1)
     embedding_device: str | None = None  # None = auto (mps / cuda / cpu)
 
+    # --- Reranking -------------------------------------------------------------
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_batch_size: int = Field(default=16, ge=1)
+    reranker_top_k: int = Field(default=5, ge=1)
+
     # --- Qdrant --------------------------------------------------------------
     # QDRANT_URL set   -> Qdrant Cloud / server.  Unset -> embedded local index under
     # data/indexes/qdrant (same client API; one process at a time; fine for development).
@@ -96,8 +118,20 @@ class Settings(BaseSettings):
         "If this is an emergency, please hang up and call {emergency}. "
         "How can I help you today?"
     )
+    # Spoken when the reply could not be generated (LLM error, timeout or refusal).
+    reply_fallback: str = (
+        "I'm sorry, I'm having trouble answering right now. "
+        "If this is urgent, please contact a clinician or call {emergency}."
+    )
 
-    @field_validator("qdrant_url", "qdrant_api_key", "embedding_device", mode="before")
+    @field_validator(
+        "qdrant_url",
+        "qdrant_api_key",
+        "embedding_device",
+        "anthropic_api_key",
+        "llm_effort",
+        mode="before",
+    )
     @classmethod
     def _blank_is_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
@@ -110,6 +144,10 @@ class Settings(BaseSettings):
     @property
     def greeting_text(self) -> str:
         return self.call_greeting.format(emergency=self.emergency_number_phrase)
+
+    @property
+    def reply_fallback_text(self) -> str:
+        return self.reply_fallback.format(emergency=self.emergency_number_phrase)
 
 
 @lru_cache

@@ -23,9 +23,11 @@ from app.rag.embeddings import SentenceTransformerEmbedder
 from app.rag.ingestion.pipeline import load_chunks
 from app.rag.retrieval.dense import DenseRetriever
 from app.rag.retrieval.filters import RetrievalFilters
+from app.rag.retrieval.hybrid import HybridRetriever
 from app.rag.retrieval.indexer import index_chunks
 from app.rag.retrieval.qdrant_store import QdrantChunkStore, build_client
-from app.schemas.clinical import ChunkType
+from app.rag.retrieval.sparse import SparseRetriever
+from app.schemas.clinical import ChunkType, RetrievalScores
 
 
 def _embedder(settings: Settings) -> SentenceTransformerEmbedder:
@@ -95,31 +97,74 @@ async def cmd_index(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_sparse(settings: Settings) -> SparseRetriever:
+    chunks_path = settings.data_dir / "processed" / "chunks.jsonl"
+    if not chunks_path.exists():
+        raise FileNotFoundError(f"{chunks_path} not found — run `make ingest` first.")
+    return SparseRetriever(load_chunks(chunks_path))
+
+
+def _fmt_scores(s: RetrievalScores) -> str:
+    parts = []
+    if s.dense_score is not None:
+        parts.append(f"dense={s.dense_score:.3f}(#{s.dense_rank})")
+    if s.bm25_score is not None:
+        parts.append(f"bm25={s.bm25_score:.2f}(#{s.bm25_rank})")
+    if s.rrf_score is not None:
+        parts.append(f"rrf={s.rrf_score:.4f}")
+    return " ".join(parts)
+
+
 async def cmd_query(settings: Settings, args: argparse.Namespace) -> int:
-    client = build_client(settings, force_local=args.local)
-    store = QdrantChunkStore(client, settings.qdrant_collection, settings.embedding_model)
-    retriever = DenseRetriever(store, _embedder(settings))
     filters = RetrievalFilters(
         population=args.population or None,
         topics=args.topic or None,
         document_types=args.document_type or None,
         chunk_types=[ChunkType(c) for c in args.chunk_type] or None,
     )
+    client = None
     t0 = time.perf_counter()
-    hits = await retriever.search(args.query, filters=filters, k=args.k)
+    relaxed = False
+    timings: dict[str, float] = {}
+
+    if args.mode == "bm25":
+        hits = _load_sparse(settings).search(args.query, filters=filters, k=args.k)
+    else:
+        client = build_client(settings, force_local=args.local)
+        store = QdrantChunkStore(client, settings.qdrant_collection, settings.embedding_model)
+        dense = DenseRetriever(store, _embedder(settings))
+        if args.mode == "dense":
+            hits = await dense.search(args.query, filters=filters, k=args.k)
+        else:
+            result = await HybridRetriever(dense, _load_sparse(settings)).search(
+                args.query, filters=filters
+            )
+            hits, relaxed, timings = (
+                result.candidates[: args.k],
+                result.filter_relaxed,
+                result.timings_ms,
+            )
     elapsed_ms = (time.perf_counter() - t0) * 1000
+
+    backend = "in-memory BM25" if args.mode == "bm25" else _describe_backend(settings, args.local)
     print(
-        f"{len(hits)} results in {elapsed_ms:.0f} ms  ({_describe_backend(settings, args.local)})\n"
+        f"[{args.mode}] {len(hits)} results in {elapsed_ms:.0f} ms (incl. model/index load)  ({backend})"
     )
+    if timings:
+        print("  stage timings (ms):", {k: round(v, 1) for k, v in timings.items()})
+    if relaxed:
+        print("  note: strict filter returned too few results; topic filter was relaxed")
+    print()
     for rank, hit in enumerate(hits, start=1):
         m = hit.metadata
         print(
-            f"{rank}. score={hit.scores.dense_score:.3f}  {m.document_id} p{m.page_number}  "
+            f"{rank}. {_fmt_scores(hit.scores)}  {m.document_id} p{m.page_number}  "
             f"[{m.chunk_type.value}/{m.population}/{m.topic}]"
         )
         print(f"   {' > '.join(m.heading_path)[-110:]}")
         print(f"   {hit.text[: args.chars].replace(chr(10), ' ')}\n")
-    await client.close()
+    if client is not None:
+        await client.close()
     return 0
 
 
@@ -142,6 +187,7 @@ def main() -> int:
     p_index.add_argument("--recreate", action="store_true", help="drop and rebuild the collection")
     p_query = sub.add_parser("query", help="dense search with optional metadata filters")
     p_query.add_argument("query")
+    p_query.add_argument("--mode", choices=["hybrid", "dense", "bm25"], default="hybrid")
     p_query.add_argument("-k", type=int, default=5)
     p_query.add_argument(
         "--population", action="append", default=[], help="repeatable: adult|child|pregnancy|all"

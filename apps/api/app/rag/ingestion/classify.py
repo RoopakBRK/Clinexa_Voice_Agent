@@ -223,6 +223,14 @@ def classify_topics(path: Sequence[str], text: str, fallback: Sequence[str]) -> 
     return ranked or list(fallback[:1])
 
 
+def infer_topics(text: str, max_topics: int = 2) -> list[str]:
+    """Topics suggested by a caller's own words (query side). A single keyword hit is
+    enough here (short utterances), unlike chunk labelling which needs two."""
+    lowered = f" {text.lower()} "
+    scores = Counter({t: len(p.findall(lowered)) for t, p in _TOPIC_PATTERNS.items()})
+    return [t for t, n in scores.most_common(max_topics) if n > 0]
+
+
 def classify_population(doc_population: str, path: Sequence[str]) -> str:
     """Document population, narrowed by section headings for mixed documents."""
     if doc_population != "all":

@@ -139,33 +139,33 @@
     {
       "doc_id": "sa-ndoh-adult-primary-care",
       "title": "Adult Primary Care (APC) 2016/2017: symptom-based integrated approach to the adult in primary care",
-      "pages": 117,
-      "sections": 225,
-      "chunks": 357,
-      "retrievable_chunks": 346,
-      "tokens_p50": 247.0,
+      "pages": 111,
+      "sections": 203,
+      "chunks": 330,
+      "retrievable_chunks": 330,
+      "tokens_p50": 255.0,
       "tokens_p95": 350.0,
       "tokens_max": 392,
       "chunk_types": {
-        "text": 177,
-        "table": 87,
-        "warning": 93
+        "warning": 93,
+        "text": 157,
+        "table": 80
       },
       "populations": {
-        "adult": 357
+        "adult": 330
       },
       "top_topics": {
-        "infectious_disease": 85,
-        "maternal_reproductive": 48,
-        "adult_primary_care": 38,
-        "cardiovascular": 27,
-        "mental_health": 26
+        "infectious_disease": 82,
+        "maternal_reproductive": 46,
+        "skin": 26,
+        "cardiovascular": 26,
+        "mental_health": 24
       }
     }
   ],
-  "total_chunks": 4821,
-  "total_retrievable": 4217,
+  "total_chunks": 4794,
+  "total_retrievable": 4201,
   "target_tokens": 350,
   "embedding_tokenizer": "BAAI/bge-small-en-v1.5",
-  "duration_s": 10.3
+  "duration_s": 9.1
 }
