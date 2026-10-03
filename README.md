@@ -8,7 +8,7 @@ and recommends an appropriate next step — escalating to a human clinician when
 > prescribe, change medication, or present itself as a clinician. Every call opens with
 > that disclaimer and emergency guidance. All patient data in this project is synthetic.
 
-**Stack:** Twilio Voice + Media Streams · Deepgram streaming STT · FastAPI (async) ·
+**Stack:** Twilio Voice + Media Streams · Deepgram streaming STT + Aura TTS · Claude · FastAPI (async) ·
 LangGraph multi-agent orchestration · hybrid RAG (Qdrant + BM25 + RRF + cross-encoder) ·
 PostgreSQL · Redis · Pydantic Logfire (OpenTelemetry) · Next.js dashboard
 
@@ -21,12 +21,12 @@ Full design with diagrams: **[docs/architecture.md](docs/architecture.md)**
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Twilio → WebSocket → Deepgram streaming STT | ✅ done |
+| 2 | STT → Claude → streaming TTS → Twilio (spoken replies) | ✅ built; telephony, STT and TTS verified on simulated live calls, the Claude call so far only against a fake |
 | 5 | WHO document ingestion & chunking → `data/processed/chunks.jsonl` | ✅ done |
 | 6 | Local embeddings (bge-small) + Qdrant dense retrieval with metadata filters | ✅ done (validated on the embedded index; Cloud pending) |
 | 7 | BM25 + reciprocal rank fusion hybrid retrieval, clinical metadata filters | ✅ done |
 | 8 | Cross-encoder reranking + retrieval evaluation harness | ✅ built; question set is a **draft awaiting human review** |
-| 2 | STT → LLM → streaming TTS → Twilio | |
-| 3 | Streaming, endpointing, barge-in | |
+| 3 | Endpointing tuning, barge-in, persistent TTS connection | |
 | 4 | LangGraph state machine | |
 | 9–12 | Intake · red-flag safety · medication info · human escalation agents | |
 | 13–14 | Redis + PostgreSQL memory · observability | |
@@ -65,6 +65,36 @@ Caller ──PSTN──▶ Twilio ──POST /twilio/voice──▶ FastAPI  (si
 - **Domain contracts ready for later phases**: `VoiceClinicalState`, `ClinicalIntake`,
   `SafetyAssessment` (urgent ⇒ escalation enforced in the schema), `Evidence`,
   `EscalationSummary`, `DocumentMetadata`, retrieval score models.
+
+## Spoken replies (Phase 2)
+
+```
+caller utterance ─▶ Claude (streamed text) ─▶ sentence chunker ─▶ Deepgram Aura TTS ─▶ Twilio `media` frames ─▶ caller
+   (end of turn)        runs while the TTS         first sentence is       μ-law 8 kHz, no        + a `mark` when the
+                        socket is connecting       spoken on its own       transcoding            reply has been queued
+```
+
+- **One reply task per turn** (`CallSession._reply`). The LLM streams in its own task, so it is already
+  generating while the TTS connection opens. Text is cut into sentences (`app/voice/sentences.py`) and
+  the first sentence is synthesised while the rest is still being written.
+- **Claude** (`app/agents/responder.py`): `ANTHROPIC_MODEL` (default `claude-opus-5-5`) at low effort,
+  streamed, with server-side refusal fallback. The system prompt holds the safety scope: no diagnosis,
+  no prescribing or dose changes, emergency signposting before anything else, short spoken sentences.
+  This single call is the whole "agent" until the LangGraph graph (Phase 4) replaces it. It has no
+  retrieval and no red-flag policy yet.
+- **Deepgram Aura** over the raw `/v1/speak` WebSocket, returning μ-law 8 kHz directly, so audio goes
+  to Twilio untouched.
+- **A caller is never left in silence.** If the model errors, times out, declines or returns nothing, a
+  fixed line is spoken instead ("…please contact a clinician or call *emergency number*"). A reply that
+  fails midway is cut short rather than restarted.
+- **The transcript records what was heard.** An assistant turn is stored only if its audio started, and
+  is flagged `interrupted` if it was cut off (hang-up, TTS failure).
+- **Turn-taking is sequential for now.** If the caller speaks during a reply, one further reply follows
+  that covers everything said since. Cutting the assistant off mid-sentence (barge-in) is Phase 3.
+- **Latency per call:** `llm_ttft_ms`, `llm_first_sentence_ms`, `llm_total_ms`, `tts_ttfa_ms`,
+  `response_latency_ms` (end of turn detected → first reply audio sent) and `voice_to_voice_ms`
+  (caller's last word → first reply audio sent).
+- Without `ANTHROPIC_API_KEY` (or with no TTS provider) calls are transcribed only, as in Phase 1.
 
 ## Knowledge base: WHO ingestion (Phase 5)
 
@@ -193,12 +223,14 @@ python -m app.rag.evaluation retrieval --local \
 │   │   │   ├── main.py           app factory, /health
 │   │   │   ├── core/             settings, structured logging
 │   │   │   ├── voice/            Twilio webhook + media stream, session, turns, audio, security
-│   │   │   │   └── providers/    STT/TTS interfaces, Deepgram implementation
+│   │   │   │   └── providers/    STT/TTS interfaces, Deepgram implementations
 │   │   │   ├── api/              call inspection endpoints
+│   │   │   ├── agents/           reply generator (Claude); LangGraph agents arrive in Phase 4+
 │   │   │   ├── graph/            LangGraph state (graph itself: Phase 4)
 │   │   │   ├── schemas/          clinical domain contracts
 │   │   │   ├── observability/    latency metrics (p50/p95/p99)
-│   │   │   ├── agents/  rag/  tools/  memory/  database/    ← later phases
+│   │   │   ├── rag/              ingestion, retrieval, reranking, evaluation
+│   │   │   ├── tools/  memory/  database/    ← later phases
 │   │   └── tests/
 │   └── web/                      Next.js dashboard (Phase 16)
 ├── data/                     WHO source PDFs, manifests/documents.yaml, processed/ (chunks)
@@ -212,11 +244,12 @@ python -m app.rag.evaluation retrieval --local \
 ## Local setup
 
 **Prerequisites:** [uv](https://docs.astral.sh/uv/) (installs Python 3.12 automatically),
-a [Deepgram](https://console.deepgram.com) API key; for real phone calls also a Twilio
-account with a voice-capable number and [ngrok](https://ngrok.com).
+a [Deepgram](https://console.deepgram.com) API key (STT and TTS) and an
+[Anthropic](https://console.anthropic.com) API key (replies); for real phone calls also a
+Twilio account with a voice-capable number and [ngrok](https://ngrok.com).
 
 ```bash
-cp .env.example .env          # add DEEPGRAM_API_KEY (and Twilio values for real calls)
+cp .env.example .env          # add DEEPGRAM_API_KEY, ANTHROPIC_API_KEY (and Twilio values for real calls)
 make install                  # uv sync in apps/api
 make test                     # unit + integration tests (no network needed)
 make dev                      # API on http://localhost:8000
@@ -227,15 +260,18 @@ curl localhost:8000/health
 
 `scripts/simulate_call.py` behaves like Twilio: it calls the signed webhook, reads
 the stream URL and token from the TwiML, and streams 20 ms μ-law frames in real time.
-Your real Deepgram key does the transcription.
+Your real Deepgram key does the transcription and the speech; your Anthropic key writes the reply.
+The simulator stays on the line until the reply has finished, like a caller listening.
 
 ```bash
 make dev                                              # terminal 1
 make simulate TEXT="I've had a cough for five days"   # terminal 2 (macOS `say` voice)
 # or: uv run --project apps/api python scripts/simulate_call.py --wav caller_8k.wav
+# add --save-reply reply.wav to keep the assistant's speech
 ```
 
-The simulator prints the transcript and the measured STT latency percentiles.
+The simulator prints the transcript (caller and assistant), how long after the caller stopped
+speaking the first reply audio arrived, and the latency percentiles the API measured.
 
 ### Real phone calls via Twilio
 
@@ -261,7 +297,10 @@ The most important ones:
 | `PUBLIC_BASE_URL` | Public origin Twilio reaches; builds the `wss://` stream URL and validates signatures |
 | `TWILIO_AUTH_TOKEN` | Webhook signature validation (fails closed if missing while validation is on) |
 | `STREAM_TOKEN_SECRET` | HMAC secret for stream tokens; set explicitly when running >1 instance |
-| `DEEPGRAM_API_KEY` | Streaming STT |
+| `DEEPGRAM_API_KEY` | Streaming STT and TTS |
+| `DEEPGRAM_TTS_MODEL` | Aura voice for replies |
+| `ANTHROPIC_API_KEY` | Reply generation; without it calls are transcribed but not answered |
+| `ANTHROPIC_MODEL` / `LLM_EFFORT` | Model and thinking depth for replies (`claude-opus-5-5`, `low`) |
 | `DEEPGRAM_ENDPOINTING_MS` / `DEEPGRAM_UTTERANCE_END_MS` | Turn-detection tuning |
 | `LOG_TRANSCRIPTS` | Log utterance text (off by default: transcripts are health data) |
 
@@ -274,13 +313,13 @@ make test        # pytest
 make check       # all of the above
 ```
 
-## API reference (Phase 1)
+## API reference
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Liveness, STT provider status, active call count |
+| `GET` | `/health` | Liveness, STT / TTS / LLM provider status, active call count |
 | `POST` | `/twilio/voice` | Twilio incoming-call webhook → TwiML |
-| `WS` | `/twilio/media-stream` | Twilio bidirectional Media Stream |
+| `WS` | `/twilio/media-stream` | Twilio bidirectional Media Stream (caller audio in, reply audio out) |
 | `GET` | `/api/calls/active` | Live calls |
 | `GET` | `/api/calls/recent` | Last 50 finished calls |
 | `GET` | `/api/calls/{call_sid}` | Transcript, status, latency percentiles |

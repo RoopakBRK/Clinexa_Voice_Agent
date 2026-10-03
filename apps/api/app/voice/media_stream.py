@@ -6,7 +6,7 @@ import contextlib
 
 import structlog
 from fastapi import APIRouter, Depends, WebSocket
-from starlette.websockets import WebSocketState
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from app.agents.responder import ReplyGenerator
 from app.core.config import Settings
@@ -87,7 +87,8 @@ async def media_stream(
             websocket.application_state is WebSocketState.CONNECTED
             and websocket.client_state is WebSocketState.CONNECTED
         ):
-            with contextlib.suppress(RuntimeError):
+            # Twilio usually drops the socket right after `stop`, before we close it.
+            with contextlib.suppress(RuntimeError, WebSocketDisconnect):
                 await websocket.close()
         structlog.contextvars.unbind_contextvars("call_sid", "stream_sid")
 

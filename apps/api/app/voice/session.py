@@ -392,7 +392,8 @@ class CallSession:
         def emit(sentence: str) -> None:
             if turn.first_sentence_at is None:
                 turn.first_sentence_at = time.monotonic()
-                self.metrics.record("llm_first_sentence_ms", _ms_since(started))
+                if not turn.fallback:
+                    self.metrics.record("llm_first_sentence_ms", _ms_since(started))
             turn.sentences.append(sentence)
             sentences.put_nowait(sentence)
 

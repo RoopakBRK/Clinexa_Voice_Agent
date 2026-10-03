@@ -371,6 +371,9 @@ async def test_caller_hears_fallback_when_no_reply_is_generated(
     assert call.audio() == [settings.reply_fallback_text]
     assert "your local emergency number" in call.audio()[0]
     assert call.transcript("assistant") == [settings.reply_fallback_text]
+    # The canned line is not model output, so it must not count as LLM latency.
+    assert "llm_first_sentence_ms" not in call.session.metrics.summary()
+    assert call.session.metrics.summary()["response_latency_ms"].count == 1
     await call.session.close()
 
 
