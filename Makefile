@@ -3,7 +3,7 @@ UV_API := uv run --project $(API)
 PORT ?= 8000
 TEXT ?= I've had a headache for three days and it's getting worse.
 
-.PHONY: help install dev test lint format typecheck check simulate tunnel requirements ingest index query
+.PHONY: help install dev test lint format typecheck check simulate tunnel requirements ingest index query exotel-status exotel-check exotel-whatsapp
 
 help:  ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -39,6 +39,15 @@ index:  ## Embed chunks and upsert into Qdrant (ARGS="--local" for the embedded 
 
 query:  ## Dense search: make query Q="cough for 5 days" ARGS="--local"
 	cd $(API) && uv run python -m app.rag.retrieval $(ARGS) query "$(Q)"
+
+exotel-status:  ## Exotel: what is filled in, and what to paste into the Exotel dashboard
+	$(UV_API) python scripts/exotel.py status
+
+exotel-check:  ## Exotel: sign in and list your ExoPhones (sends nothing)
+	$(UV_API) python scripts/exotel.py check
+
+exotel-whatsapp:  ## Exotel: send the reminder template to your own number (TO=98XXXXXXXX)
+	$(UV_API) python scripts/exotel.py whatsapp $(TO)
 
 tunnel:  ## Expose the local API to Twilio via ngrok
 	ngrok http $(PORT)

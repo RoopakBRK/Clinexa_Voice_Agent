@@ -96,6 +96,99 @@ caller utterance ─▶ Claude (streamed text) ─▶ sentence chunker ─▶ De
   (caller's last word → first reply audio sent).
 - Without `ANTHROPIC_API_KEY` (or with no TTS provider) calls are transcribed only, as in Phase 1.
 
+## Roopiee on the website: the browser channel
+
+The Clinexsa website's "Onboarding for Patient" page talks to the same pipeline over a
+WebSocket instead of a phone line. Roopiee asks the questions, hears the answers and fills
+the page's form through tool calls. The Twilio path is unchanged.
+
+```
+POST /web/session {onboarding_id, language}  ->  {ws_url, token, expires_in}
+WS   /web/onboarding-stream?token=...
+
+browser -> server   binary  linear16 16 kHz mono mic frames (about 20 ms each)
+                    JSON    start | pause | resume | stop | tool_result | form_edit
+server -> browser   binary  linear16 24 kHz mono speech
+                    JSON    transcript | status | clear_audio | tool_call | error
+```
+
+- `app/voice/transport.py`: `CallSession` now speaks through a `Transport`. `TwilioTransport`
+  wraps the Media Streams frames; `WebTransport` sends raw PCM plus JSON events.
+- `app/voice/web_stream.py`: the two endpoints. The token is an HMAC over the onboarding id
+  with a 60 s expiry (`STREAM_TOKEN_SECRET`), usable once. Sessions are rate-limited per IP,
+  CORS and the WebSocket `Origin` are limited to `WEB_ALLOWED_ORIGINS`, and a session with
+  15 minutes of silence is closed.
+- `app/agents/onboarding.py`: `OnboardingReplyGenerator`, one per session. Claude calls the
+  ten form tools; each call goes to the page as `tool_call` and the page's `tool_result`
+  (or `"timeout"` after 5 s) goes back to Claude. Only text is spoken. Tool arguments are
+  health details and are never logged.
+- Barge-in: when Deepgram reports `SpeechStarted` while a reply is still playing, the reply
+  is cancelled and the page is told to `clear_audio`. If no words follow within a few
+  seconds (a cough, a door), Roopiee repeats her question. Phone calls are not affected.
+- `app/voice/languages.py`: Nova-3 transcribes all nine languages the page offers, but Aura
+  has no Indian-language voices yet, so only English can be spoken. `POST /web/session`
+  answers 422 `language_unavailable` for the others and `GET /web/languages` lists which
+  can be spoken. Give a language a `tts_model` there to switch it on.
+
+Try it without a browser (API running, real Deepgram and Claude keys):
+
+```bash
+make dev PORT=8010
+uv run --project apps/api python scripts/simulate_web_onboarding.py --api http://localhost:8010 \
+    --text "My name is Ramesh Kumar and I am sixty two years old"
+```
+
+## Hosting on Fly.io
+
+The website can only reach Roopiee on a public https address. `Dockerfile` and
+`fly.toml` put her on Fly.io in Mumbai (`bom`), on one always-on machine.
+
+**Only a signed-in person can start a session.** `POST /web/session` asks Supabase
+whether the access token the website sent is real (`app/voice/sign_in.py`). With
+`ENVIRONMENT=production` and no `SUPABASE_PUBLISHABLE_KEY`, every request is
+refused. On a laptop, without that key, the check is off.
+
+One-time, from this folder:
+
+```bash
+brew install flyctl
+fly auth login
+fly launch --no-deploy --copy-config --name clinexsa-roopiee --region bom
+fly secrets set \
+  DEEPGRAM_API_KEY=... \
+  ANTHROPIC_API_KEY=... \
+  SUPABASE_PUBLISHABLE_KEY=... \
+  STREAM_TOKEN_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+fly deploy
+```
+
+`SUPABASE_PUBLISHABLE_KEY` is the same value as the website's
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. The other settings are in `fly.toml`. If
+the name `clinexsa-roopiee` is taken, pick another and use that address below.
+
+Then tell the website where she is: on Vercel set
+`NEXT_PUBLIC_ROOPIEE_API_URL=https://clinexsa-roopiee.fly.dev` and redeploy.
+
+Check it without starting a conversation:
+
+```bash
+curl https://clinexsa-roopiee.fly.dev/health          # "status": "ok", "environment": "production"
+curl https://clinexsa-roopiee.fly.dev/web/languages   # English has "speech": true
+curl -X POST https://clinexsa-roopiee.fly.dev/web/session \
+  -H 'content-type: application/json' -d '{"onboarding_id":"check-0001"}'   # 401, signed_out
+```
+
+Things to know:
+- **One machine only.** Session tokens and the per-address rate limit live in the
+  process's memory. Do not scale to two.
+- **The image leaves out the knowledge-base libraries** (PyTorch and the NVIDIA runtime,
+  several gigabytes), because nothing a call or a web session touches imports
+  `app/rag`. The Dockerfile says which line to change when that is wired in.
+- **The Anthropic key needs credit.** Without it Roopiee connects and listens, but
+  every reply is the fallback line.
+- Not checked yet: whether Fly's proxy closes a paused conversation that sends nothing
+  for a minute. If it does, send a keep-alive from the page while paused.
+
 ## Knowledge base: WHO ingestion (Phase 5)
 
 `make ingest` turns the PDFs in `data/` into section-aware chunks (no API keys needed):
@@ -320,6 +413,9 @@ make check       # all of the above
 | `GET` | `/health` | Liveness, STT / TTS / LLM provider status, active call count |
 | `POST` | `/twilio/voice` | Twilio incoming-call webhook → TwiML |
 | `WS` | `/twilio/media-stream` | Twilio bidirectional Media Stream (caller audio in, reply audio out) |
+| `GET` | `/web/languages` | Languages the website offers, and which Roopiee can speak |
+| `POST` | `/web/session` | Short-lived token and stream URL for one website onboarding |
+| `WS` | `/web/onboarding-stream` | Browser channel: mic audio in, speech and form tool calls out |
 | `GET` | `/api/calls/active` | Live calls |
 | `GET` | `/api/calls/recent` | Last 50 finished calls |
 | `GET` | `/api/calls/{call_sid}` | Transcript, status, latency percentiles |

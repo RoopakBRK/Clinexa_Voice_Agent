@@ -1,22 +1,24 @@
-"""A single live phone call: Twilio audio in -> STT -> reply (LLM -> TTS) -> Twilio.
+"""A single live conversation: audio in -> STT -> reply (LLM -> TTS) -> audio out.
 
-The WebSocket handler only parses Twilio frames and feeds audio here; STT runs
-in its own task so a slow provider never blocks frame reads. Audio is buffered
-in a bounded queue, which also preserves audio while STT reconnects.
+The WebSocket handler only parses frames and feeds audio here; STT runs in its
+own task so a slow provider never blocks frame reads. Audio is buffered in a
+bounded queue, which also preserves audio while STT reconnects.
 
 Each caller utterance is answered in a separate reply task: reply text streams
 from the LLM, is cut into sentences, and each sentence is synthesised and sent
-to Twilio while the rest is still being written.
+through the session's transport (a Twilio phone call or a browser tab) while
+the rest is still being written.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -37,16 +39,17 @@ from app.voice.providers.base import (
     TTSProvider,
 )
 from app.voice.sentences import SentenceChunker
+from app.voice.transport import FrameSender, Transport, TwilioTransport
 from app.voice.turns import Utterance, UtteranceAssembler
-from app.voice.twilio_protocol import outbound_mark, outbound_media
 
 log = get_logger(__name__)
 
 UtteranceHandler = Callable[["CallSession", Utterance], Awaitable[None]]
-# Sends one Twilio Media Streams frame (JSON text) to the caller's WebSocket.
-FrameSender = Callable[[str], Awaitable[None]]
 
 _STT_DRAIN_TIMEOUT_S = 6.0
+# After a reply is cut off by speech that turns out to be noise (no words follow),
+# the assistant picks the conversation back up rather than leave a silence.
+_BARGE_IN_RECOVERY_S = 6.0
 
 
 @dataclass
@@ -99,16 +102,23 @@ class CallSession:
         stt: STTProvider,
         settings: Settings,
         caller: str | None = None,
-        audio_format: AudioFormat = TWILIO_AUDIO_FORMAT,
+        audio_format: AudioFormat | None = None,
         on_utterance: UtteranceHandler | None = None,
         responder: ReplyGenerator | None = None,
         tts: TTSProvider | None = None,
         send: FrameSender | None = None,
+        transport: Transport | None = None,
+        fallback_text: str | None = None,
     ) -> None:
+        # A bare Twilio frame sender is still accepted and wrapped.
+        if transport is None and send is not None:
+            transport = TwilioTransport(stream_sid, send)
         self.call_sid = call_sid
         self.stream_sid = stream_sid
         self.caller = caller
-        self.audio_format = audio_format
+        self.audio_format = audio_format or (
+            transport.input_format if transport is not None else TWILIO_AUDIO_FORMAT
+        )
         self.state = VoiceClinicalState(call_id=call_sid)
         self.metrics = LatencyMetrics()
         self.status = CallStatus.ACTIVE
@@ -121,10 +131,16 @@ class CallSession:
         # Replies need all three; without them the call is transcribed only.
         self._responder = responder
         self._tts = tts
-        self._send = send
+        self._transport = transport
+        # Spoken when a reply cannot be generated.
+        self._fallback_text = fallback_text or settings.reply_fallback_text
         self._reply_task: asyncio.Task[None] | None = None
         self._reply_due: tuple[float, float | None] | None = None
         self.replies_spoken = 0
+        # Monotonic time until which audio already sent is still playing out.
+        self._playback_until = 0.0
+        self._recovery_task: asyncio.Task[None] | None = None
+        self.utterances_heard = 0
         self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(
             maxsize=settings.audio_queue_max_frames
         )
@@ -152,7 +168,7 @@ class CallSession:
 
     @property
     def replies_enabled(self) -> bool:
-        return self._responder is not None and self._tts is not None and self._send is not None
+        return self._responder is not None and self._tts is not None and self._transport is not None
 
     def feed_audio(self, chunk: bytes) -> None:
         if self._closed or self.status is CallStatus.STT_UNAVAILABLE:
@@ -178,6 +194,8 @@ class CallSession:
 
     async def _finalize(self) -> None:
         # The caller has gone: stop talking before flushing what they said last.
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
         if self._reply_task is not None:
             self._reply_task.cancel()
             await asyncio.gather(self._reply_task, return_exceptions=True)
@@ -282,14 +300,19 @@ class CallSession:
     async def _on_transcript_event(self, event: TranscriptEvent) -> None:
         match event.type:
             case TranscriptEventType.SPEECH_STARTED:
-                # Phase 3: barge-in hook (stop TTS, clear Twilio buffer, cancel turn).
                 log.debug("stt.speech_started", audio_s=event.audio_start_s)
+                await self._barge_in()
             case TranscriptEventType.INTERIM:
                 pending = self._assembler.pending_text
                 self.state.current_transcript = f"{pending} {event.text}".strip()
+                await self._send_live_transcript()
             case TranscriptEventType.FINAL:
                 if event.finalization_latency_ms is not None:
                     self.metrics.record("stt_finalization_ms", event.finalization_latency_ms)
+                if not event.speech_final:
+                    pending = self._assembler.pending_text
+                    self.state.current_transcript = f"{pending} {event.text}".strip()
+                    await self._send_live_transcript()
             case TranscriptEventType.METADATA:
                 log.info("stt.metadata", request_id=event.provider_request_id)
 
@@ -305,6 +328,9 @@ class CallSession:
             )
         )
         self.state.current_transcript = ""
+        self.utterances_heard += 1
+        if self._transport is not None:
+            await self._emit(self._transport.send_transcript("user", utterance.text, final=True))
         log.info(
             "call.utterance",
             text=utterance.text if self._settings.log_transcripts else "<redacted>",
@@ -320,10 +346,29 @@ class CallSession:
 
     # --- replies -----------------------------------------------------------
 
+    def request_reply(self) -> None:
+        """Ask for a reply with no new utterance: the opening turn, or after a pause."""
+        if self.replies_enabled and not self._closed:
+            self._schedule_reply(None)
+
+    async def interrupt(self) -> None:
+        """Stop the reply being spoken and drop audio that has not played yet."""
+        task = self._reply_task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self._playback_until = 0.0
+        if self._transport is not None:
+            await self._emit(self._transport.clear_audio())
+            await self._emit(self._transport.send_status("listening"))
+
     def _request_reply(self, utterance: Utterance) -> None:
+        self._schedule_reply(utterance.endpoint_latency_ms)
+
+    def _schedule_reply(self, endpoint_latency_ms: float | None) -> None:
         # Replies are spoken one at a time. If the caller says more while one is
         # being spoken, a single further reply covers everything said since.
-        self._reply_due = (time.monotonic(), utterance.endpoint_latency_ms)
+        self._reply_due = (time.monotonic(), endpoint_latency_ms)
         if self._reply_task is None or self._reply_task.done():
             self._reply_task = asyncio.create_task(
                 self._reply_loop(), name=f"reply-{self.call_sid}"
@@ -336,11 +381,56 @@ class CallSession:
                 await self._reply(_ReplyTurn(heard_at=due[0], endpoint_latency_ms=due[1]))
             except Exception:
                 log.exception("reply.failed")
+        if self._transport is not None:
+            await self._emit(self._transport.send_status("listening"))
+
+    async def _barge_in(self) -> None:
+        """The person started talking: cut off a reply they can still hear."""
+        if self._transport is None or not self._transport.supports_barge_in:
+            return
+        if time.monotonic() >= self._playback_until:
+            return  # nothing is playing (a reply still being written is left alone)
+        log.info("call.barge_in")
+        await self.interrupt()
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
+        self._recovery_task = asyncio.create_task(
+            self._recover_from_barge_in(self.utterances_heard), name=f"recover-{self.call_sid}"
+        )
+
+    async def _recover_from_barge_in(self, utterances_before: int) -> None:
+        await asyncio.sleep(_BARGE_IN_RECOVERY_S)
+        if self._closed or self.utterances_heard != utterances_before:
+            return
+        if self.state.current_transcript or self._assembler.pending_text:
+            return  # they are mid-sentence; their utterance will get the reply
+        if self._responder is not None:
+            self._responder.add_note(
+                "You were cut off by a noise but nobody spoke. Say your last question "
+                "again, briefly."
+            )
+        self.request_reply()
+
+    async def _send_live_transcript(self) -> None:
+        if self._transport is not None and self.state.current_transcript:
+            await self._emit(
+                self._transport.send_transcript("user", self.state.current_transcript, final=False)
+            )
+
+    async def _emit(self, event: Coroutine[Any, Any, None]) -> None:
+        # Transcript and status events are best-effort: a socket that has gone
+        # away must not take the STT or reply task down with it.
+        try:
+            await event
+        except Exception as exc:
+            log.debug("transport.event_dropped", error=repr(exc))
 
     async def _reply(self, turn: _ReplyTurn) -> None:
         history = self.state.conversation_history
         position = len(history)  # the reply belongs here even if the caller speaks during it
         sentences: asyncio.Queue[str | None] = asyncio.Queue()
+        if self._transport is not None:
+            await self._emit(self._transport.send_status("thinking"))
         # The LLM runs in its own task so it is already generating while the TTS
         # connection is being opened.
         generator = asyncio.create_task(
@@ -415,31 +505,43 @@ class CallSession:
             # simply cut short; otherwise say that something went wrong.
             if not turn.sentences:
                 turn.fallback = True
-                emit(self._settings.reply_fallback_text)
+                emit(self._fallback_text)
+                if self._transport is not None:
+                    await self._emit(
+                        self._transport.send_error("reply_failed", "The reply could not be made.")
+                    )
         finally:
             sentences.put_nowait(None)
 
     async def _speak(self, sentences: asyncio.Queue[str | None], turn: _ReplyTurn) -> None:
-        assert self._tts is not None and self._send is not None
+        assert self._tts is not None and self._transport is not None
+        transport = self._transport
+        bytes_per_second = transport.output_format.bytes_per_second
 
         async def text() -> AsyncIterator[str]:
             while (sentence := await sentences.get()) is not None:
+                await self._emit(transport.send_transcript("assistant", sentence, final=True))
                 yield sentence
 
-        audio = self._tts.synthesize_stream(text(), self.audio_format)
+        audio = self._tts.synthesize_stream(text(), transport.output_format)
         try:
             async for chunk in audio:
                 if not turn.audio_started:
                     turn.audio_started = True
                     self._record_first_audio(turn)
-                await self._send(outbound_media(self.stream_sid, chunk))
+                    await self._emit(transport.send_status("speaking"))
+                await transport.send_audio(chunk)
+                # Sent audio plays out in real time on the other side.
+                self._playback_until = (
+                    max(self._playback_until, time.monotonic()) + len(chunk) / bytes_per_second
+                )
         finally:
             # Hang-up cancels this task between chunks; close the provider stream now
             # rather than whenever the generator is garbage-collected.
             if isinstance(audio, AsyncGenerator):
                 await audio.aclose()
         if turn.audio_started:
-            await self._send(outbound_mark(self.stream_sid, f"reply-{self.replies_spoken + 1}"))
+            await transport.end_of_reply(f"reply-{self.replies_spoken + 1}")
 
     def _record_first_audio(self, turn: _ReplyTurn) -> None:
         now = time.monotonic()

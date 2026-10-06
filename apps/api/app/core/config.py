@@ -78,6 +78,100 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=2048, ge=256)
     llm_timeout_s: float = Field(default=20.0, gt=0)
 
+    # --- Web onboarding channel (Clinexsa website) ---------------------------
+    # Browser origins allowed to open an onboarding session (CORS + WebSocket Origin).
+    web_allowed_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
+    )
+    # Lifetime of the single-use token handed out by POST /web/session.
+    web_token_ttl_s: int = Field(default=60, ge=5, le=600)
+    # A session with no speech and no form activity for this long is closed.
+    web_idle_timeout_s: int = Field(default=900, ge=30)
+    # Sessions one IP address may start per minute.
+    web_sessions_per_minute: int = Field(default=10, ge=1)
+    # How long the agent waits for the page to answer a tool call.
+    web_tool_timeout_s: float = Field(default=5.0, gt=0)
+    # Spoken on the web channel when a reply could not be generated.
+    onboarding_reply_fallback: str = (
+        "I'm sorry, I'm having trouble right now. "
+        "You can keep filling in the form yourself. It's the same form."
+    )
+    # Medicine names boosted in speech recognition on this channel.
+    onboarding_keyterms: list[str] = Field(
+        default_factory=lambda: [
+            "Metformin",
+            "Glimepiride",
+            "Amlodipine",
+            "Telmisartan",
+            "Losartan",
+            "Atorvastatin",
+            "Rosuvastatin",
+            "Thyroxine",
+            "Pantoprazole",
+            "Aspirin",
+            "Clopidogrel",
+            "Insulin",
+            "Dolo 650",
+            "Crocin",
+            "Glycomet",
+            "Telma",
+            "Thyronorm",
+            "Ecosprin",
+            "Pan 40",
+            "Shelcal",
+        ]
+    )
+
+    # --- Exotel (patient alerts: WhatsApp messages and voice calls) -----------
+    # Kept apart from sign-in on purpose: nothing here knows about user sessions.
+    # API credentials from https://my.exotel.com/apisettings/site#api-credentials
+    exotel_api_key: SecretStr | None = None
+    exotel_api_token: SecretStr | None = None
+    exotel_account_sid: str | None = None
+    # Mumbai cluster. Singapore is api.exotel.com.
+    exotel_subdomain: str = "api.in.exotel.com"
+    # The ExoPhone (virtual number) reminder calls come from.
+    exotel_caller_id: str | None = None
+    # The Exotel flow (app id) whose Voicebot applet points at /exotel/stream.
+    exotel_voice_app_id: str | None = None
+    # The WhatsApp Business number messages come from, with country code.
+    exotel_whatsapp_from: str | None = None
+    # Message templates, approved on Exotel before they can be sent.
+    exotel_dose_template: str = "clinexsa_dose_reminder"
+    exotel_low_stock_template: str = "clinexsa_low_stock"
+    exotel_template_language: str = "en"
+    exotel_call_time_limit_s: int = Field(default=180, ge=30, le=14400)
+    exotel_ring_timeout_s: int = Field(default=30, ge=10, le=120)
+    # What Exotel must present to us. The Voicebot applet URL carries the first two as
+    # wss://<username>:<password>@host/exotel/stream; status callbacks carry ?key=<key>.
+    exotel_stream_username: str | None = None
+    exotel_stream_password: SecretStr | None = None
+    exotel_callback_key: SecretStr | None = None
+
+    # --- Supabase (server key, for the alerts worker only) ---------------------
+    # The service-role key bypasses row-level security. It lives here and nowhere else:
+    # never in the website, never in a browser.
+    supabase_url: str | None = None
+    supabase_service_role_key: SecretStr | None = None
+    # The website's publishable key, the same one every browser already has. With
+    # supabase_url it lets POST /web/session check that the caller is signed in to the
+    # website. Required in production: without it nobody can start a session there.
+    supabase_publishable_key: SecretStr | None = None
+
+    # --- Alerts worker ---------------------------------------------------------
+    # Off until Exotel and Supabase are configured and message templates are approved.
+    alerts_enabled: bool = False
+    # Bearer token the scheduler presents to POST /jobs/alerts/run.
+    alerts_jobs_token: SecretStr | None = None
+    alerts_timezone: str = "Asia/Kolkata"
+    # Run the worker on a timer inside this server. Set false to drive
+    # POST /jobs/alerts/run from an external cron instead.
+    alerts_scheduler: bool = True
+    # Hour of the day (in ALERTS_TIMEZONE) after which low-stock messages go out, once.
+    alerts_low_stock_hour: int = Field(default=10, ge=0, le=23)
+    # A reminder is due if its time fell within this many minutes before now.
+    alerts_window_min: int = Field(default=5, ge=1, le=30)
+
     # --- Voice session -----------------------------------------------------
     stt_max_reconnect_attempts: int = Field(default=3, ge=0)
     audio_queue_max_frames: int = Field(default=1500, ge=50)  # ~30 s of 20 ms frames
@@ -130,13 +224,26 @@ class Settings(BaseSettings):
         "embedding_device",
         "anthropic_api_key",
         "llm_effort",
+        "exotel_api_key",
+        "exotel_api_token",
+        "exotel_account_sid",
+        "exotel_caller_id",
+        "exotel_voice_app_id",
+        "exotel_whatsapp_from",
+        "exotel_stream_username",
+        "exotel_stream_password",
+        "exotel_callback_key",
+        "supabase_url",
+        "supabase_service_role_key",
+        "supabase_publishable_key",
+        "alerts_jobs_token",
         mode="before",
     )
     @classmethod
     def _blank_is_none(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
 
-    @field_validator("public_base_url")
+    @field_validator("public_base_url", "supabase_url")
     @classmethod
     def _strip_trailing_slash(cls, v: str | None) -> str | None:
         return v.rstrip("/") if v else v

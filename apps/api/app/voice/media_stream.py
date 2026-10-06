@@ -22,6 +22,7 @@ from app.voice.providers.base import TWILIO_AUDIO_FORMAT, STTProvider, TTSProvid
 from app.voice.registry import CallRegistry
 from app.voice.security import STREAM_TOKEN_PARAM, verify_stream_token
 from app.voice.session import CallSession
+from app.voice.transport import TwilioTransport
 from app.voice.twilio_protocol import (
     ConnectedMessage,
     DtmfMessage,
@@ -132,5 +133,5 @@ async def _start_session(
         caller=start.custom_parameters.get(CALLER_PARAM),
         responder=responder,
         tts=tts,
-        send=websocket.send_text,
+        transport=TwilioTransport(msg.stream_sid, websocket.send_text),
     )

@@ -3,12 +3,15 @@
 * HTTP webhooks are verified with Twilio's ``X-Twilio-Signature``.
 * The Media Stream WebSocket is bound to the verified webhook with a per-call
   HMAC token passed through TwiML ``<Parameter>`` and checked on ``start``.
+* The website's onboarding WebSocket is opened with a short-lived HMAC token
+  issued by ``POST /web/session``.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import time
 
 from fastapi import Depends, HTTPException, Request, status
 from twilio.request_validator import RequestValidator
@@ -30,6 +33,23 @@ def verify_stream_token(secret: str, call_sid: str, token: str | None) -> bool:
     if not token:
         return False
     return hmac.compare_digest(sign_stream_token(secret, call_sid), token)
+
+
+def sign_web_token(secret: str, onboarding_id: str, expires_at: int) -> str:
+    """``<expiry>.<hmac>``: valid for one onboarding id until ``expires_at`` (epoch seconds)."""
+    message = f"web:{onboarding_id}:{expires_at}".encode()
+    return f"{expires_at}.{hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()}"
+
+
+def verify_web_token(
+    secret: str, onboarding_id: str, token: str | None, *, now: float | None = None
+) -> bool:
+    if not token:
+        return False
+    expiry, _, _ = token.partition(".")
+    if not expiry.isdigit() or int(expiry) < (time.time() if now is None else now):
+        return False
+    return hmac.compare_digest(sign_web_token(secret, onboarding_id, int(expiry)), token)
 
 
 def public_url_for(request: Request, settings: Settings) -> str:

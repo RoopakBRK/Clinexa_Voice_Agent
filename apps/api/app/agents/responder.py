@@ -68,6 +68,12 @@ class ReplyGenerator(ABC):
     def stream_reply(self, history: Sequence[ConversationMessage]) -> AsyncIterator[str]:
         """Yield the assistant's next reply as text deltas. Raises ``ReplyError``."""
 
+    def add_note(self, note: str) -> None:  # noqa: B027 - optional hook, not abstract
+        """Something happened that the next reply should take into account.
+
+        Ignored by generators that only answer what the caller said.
+        """
+
 
 def to_messages(history: Sequence[ConversationMessage]) -> list[BetaMessageParam]:
     """Conversation history as API messages, starting with the caller's first turn."""

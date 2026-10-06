@@ -1,0 +1,7 @@
+# Only apps/api is needed to build the image. Never send secrets or the data folder.
+*
+!apps/api/pyproject.toml
+!apps/api/uv.lock
+!apps/api/app
+**/__pycache__
+**/*.pyc

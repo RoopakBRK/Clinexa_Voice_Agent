@@ -1,0 +1,42 @@
+# Roopiee's server on Fly.io, in Mumbai. How to deploy is in README.md, "Hosting on Fly.io".
+#
+# One machine only, always on. Session tokens and the per-address rate limit are kept in
+# the process's memory, so a second machine would refuse tokens the first one handed out.
+
+app = "clinexsa-roopiee"
+primary_region = "bom"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Not secrets. The keys go in with `fly secrets set` (see the README).
+[env]
+  ENVIRONMENT = "production"
+  ALERTS_ENABLED = "false"
+  SUPABASE_URL = "https://jrmwemnsvbgfvqdcirwj.supabase.co"
+  # The website's addresses. Only these may start a session from a browser.
+  WEB_ALLOWED_ORIGINS = '["https://www.clinexsa.com","http://localhost:3210"]'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # A voice conversation is one long connection. Stopping the machine would cut it.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 40
+    hard_limit = 50
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
