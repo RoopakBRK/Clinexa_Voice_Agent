@@ -4,6 +4,10 @@ The worker talks to Supabase's REST API with the service-role key, which bypasse
 row-level security. That key stays on this server. Everything the worker may touch
 is listed here, so it is easy to see how little it reads: alarms, the medicine each
 one is for, and the number to reach.
+
+Reminders are part of the plan. Before anything is sent, the database is asked which
+of the patients are inside their free trial or a paid month (clients_with_access).
+Nobody else is reminded.
 """
 
 from __future__ import annotations
@@ -165,6 +169,23 @@ class SupabaseAlertStore:
         rows = response.json()
         return rows if isinstance(rows, list) else []
 
+    async def _with_access(self, ids: set[str]) -> set[str]:
+        """The patients among these who may be reminded: on their free trial, or paid up.
+
+        The rule lives in the database, the same one the website uses. If the question
+        cannot be asked, this raises and nothing is sent.
+        """
+        if not ids:
+            return set()
+        response = await self._client.post(
+            "/rpc/clients_with_access",
+            headers={"Accept-Profile": "public", "Content-Profile": "public"},
+            json={"p_client_ids": sorted(ids)},
+        )
+        response.raise_for_status()
+        rows = response.json()
+        return {str(row) for row in rows} if isinstance(rows, list) else set()
+
     async def _by_client(self, table: str, select: str, ids: set[str]) -> dict[str, dict[str, Any]]:
         if not ids:
             return {}
@@ -184,7 +205,8 @@ class SupabaseAlertStore:
                 "and": f"(time.gte.{start.isoformat()},time.lte.{end.isoformat()})",
             },
         )
-        ids = {str(row["client_id"]) for row in rows}
+        ids = await self._with_access({str(row["client_id"]) for row in rows})
+        rows = [row for row in rows if str(row["client_id"]) in ids]
         settings = await self._by_client(
             "alert_settings",
             "client_id,quiet_start,quiet_end,paused_until,"
@@ -240,7 +262,8 @@ class SupabaseAlertStore:
                 "quantity": "not.is.null",
             },
         )
-        ids = {str(row["client_id"]) for row in rows}
+        ids = await self._with_access({str(row["client_id"]) for row in rows})
+        rows = [row for row in rows if str(row["client_id"]) in ids]
         settings = await self._by_client(
             "alert_settings",
             "client_id,low_stock_days,paused_until,whatsapp_enabled,whatsapp_number",

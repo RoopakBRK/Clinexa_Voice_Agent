@@ -269,6 +269,8 @@ async def test_the_two_switches_in_the_dashboard_decide_how_a_reminder_goes_out(
             # c3 has switched nothing on.
         ],
         "permissions": [],
+        # All three are inside their trial or a paid month.
+        "clients_with_access": ["c1", "c2", "c3"],
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -287,6 +289,64 @@ async def test_the_two_switches_in_the_dashboard_decide_how_a_reminder_goes_out(
     assert second.channels == ("call",) and second.whatsapp_number is None
     assert third.channels == ()
     assert first.first_name == "Lakshmi" and first.medicine.label == "Metformin 500 mg"
+
+
+async def test_only_patients_on_a_trial_or_a_paid_month_are_reminded() -> None:
+    asked: list[Any] = []
+    tables: dict[str, list[Any]] = {
+        "medication_alerts": [
+            {"id": "a1", "client_id": "paid", "medication_id": "m1", "time": "08:00:00"},
+            {"id": "a2", "client_id": "lapsed", "medication_id": "m2", "time": "08:00:00"},
+        ],
+        "medications": [
+            {"id": "m1", "client_id": "paid", "name": "Metformin", "quantity": 2},
+            {"id": "m2", "client_id": "lapsed", "name": "Calcium", "quantity": 2},
+        ],
+        "alert_settings": [],
+        "permissions": [],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.rsplit("/", 1)[-1]
+        if name == "clients_with_access":
+            # The database decides. Here it says the trial of "lapsed" has run out.
+            assert request.method == "POST" and request.headers["content-profile"] == "public"
+            asked.append(json.loads(request.content)["p_client_ids"])
+            return httpx.Response(200, json=["paid"])
+        return httpx.Response(200, json=tables[name])
+
+    store = SupabaseAlertStore(
+        "https://example.supabase.co",
+        "server-key",
+        client=httpx.AsyncClient(
+            base_url="https://example.supabase.co/rest/v1", transport=httpx.MockTransport(handler)
+        ),
+    )
+    due = await store.due_reminders(date(2026, 10, 6), time(7, 57), time(8, 2))
+    low = await store.low_stock()
+
+    assert [item.client_id for item in due] == ["paid"]
+    assert [item.client_id for item in low] == ["paid"]
+    assert asked == [["lapsed", "paid"], ["lapsed", "paid"]]
+
+
+async def test_nothing_is_sent_if_the_plan_cannot_be_checked() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/clients_with_access"):
+            return httpx.Response(503)
+        return httpx.Response(
+            200, json=[{"id": "a1", "client_id": "c1", "medication_id": "m1", "time": "08:00:00"}]
+        )
+
+    store = SupabaseAlertStore(
+        "https://example.supabase.co",
+        "server-key",
+        client=httpx.AsyncClient(
+            base_url="https://example.supabase.co/rest/v1", transport=httpx.MockTransport(handler)
+        ),
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        await store.due_reminders(date(2026, 10, 6), time(7, 57), time(8, 2))
 
 
 # --- Worker ----------------------------------------------------------------------

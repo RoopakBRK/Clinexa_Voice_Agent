@@ -1,0 +1,27 @@
+# Runs on every push and pull request: lint, type-check and the test suite.
+# No keys are needed. The tests fake Exotel, Deepgram, Anthropic and the database.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Install
+        run: make install
+      - name: Lint, type-check and test
+        run: make check
