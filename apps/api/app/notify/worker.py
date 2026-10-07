@@ -2,8 +2,11 @@
 
 A scheduler calls ``POST /jobs/alerts/run`` every minute or so, and
 ``POST /jobs/low-stock/run`` once a day. Each thing to send is claimed in the
-database first (one row per alarm, day and channel), so a second run, or a second
-server, never sends it again.
+database first (one row per person, day, time and channel), so a second run, or a
+second server, never sends it again.
+
+A person gets at most three medicine alerts a day on each channel: the store hands
+over one reminder for each person and time, for their three earliest times only.
 
 What it will not do:
 * message or phone anyone who has not switched that on in their dashboard, with a number;
@@ -83,7 +86,7 @@ async def run_dose_reminders(
                 continue
 
             delivery_id = await store.claim(
-                dedupe_key=f"dose:{reminder.alert_id}:{today.isoformat()}:{reminder.at.isoformat()}:{channel}",
+                dedupe_key=f"dose:{reminder.client_id}:{today.isoformat()}:{reminder.at.isoformat()}:{channel}",
                 client_id=reminder.client_id,
                 kind="dose_reminder",
                 channel=channel,
@@ -126,7 +129,7 @@ async def run_dose_reminders(
 async def run_low_stock(
     store: AlertStore, exotel: ExotelClient, settings: Settings, now: datetime | None = None
 ) -> RunResult:
-    """One WhatsApp message a day for each medicine that is running out. No calls."""
+    """One WhatsApp message a day to each person with a medicine running out. No calls."""
     today = (
         (now or datetime.now(ZoneInfo(settings.alerts_timezone)))
         .astimezone(ZoneInfo(settings.alerts_timezone))
@@ -140,7 +143,7 @@ async def run_low_stock(
             result.skipped += 1
             continue
         delivery_id = await store.claim(
-            dedupe_key=f"low:{item.medication_id}:{today.isoformat()}:{WHATSAPP}",
+            dedupe_key=f"low:{item.client_id}:{today.isoformat()}:{WHATSAPP}",
             client_id=item.client_id,
             kind="low_stock",
             channel=WHATSAPP,

@@ -55,7 +55,8 @@ def opening_line(context: CallContext) -> str:
     when = f" It is your {clock(context.at)} medicine." if context.at else ""
     return (
         f"Hello {context.first_name}, this is Roopiee from Clinexsa with your medicine reminder."
-        f"{when} It is time for {context.medicine.label}. Have you taken it?"
+        f"{when} It is time for {context.medicine.label}."
+        f" Have you taken {'them' if context.count > 1 else 'it'}?"
     )
 
 

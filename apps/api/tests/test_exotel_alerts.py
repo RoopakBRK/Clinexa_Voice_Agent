@@ -349,6 +349,161 @@ async def test_nothing_is_sent_if_the_plan_cannot_be_checked() -> None:
         await store.due_reminders(date(2026, 10, 6), time(7, 57), time(8, 2))
 
 
+def store_reading(handler: Any) -> SupabaseAlertStore:
+    return SupabaseAlertStore(
+        "https://example.supabase.co",
+        "server-key",
+        client=httpx.AsyncClient(
+            base_url="https://example.supabase.co/rest/v1", transport=httpx.MockTransport(handler)
+        ),
+    )
+
+
+def alarm_row(alert_id: str, at: str, name: str, strength: str | None = None) -> dict[str, Any]:
+    return {
+        "id": alert_id,
+        "client_id": "c1",
+        "medication_id": f"m-{alert_id}",
+        "time": at,
+        "medications": {"name": name, "strength": strength},
+        "clients": {"full_name": "Lakshmi Iyer", "language": "en"},
+    }
+
+
+async def test_medicines_due_at_the_same_time_go_out_as_one_alert(settings: Settings) -> None:
+    alarms = [
+        alarm_row("a1", "08:00:00", "Metformin", "500 mg"),
+        alarm_row("a2", "08:00:00", "Glimepiride", "1 mg"),
+    ]
+    tables: dict[str, list[Any]] = {
+        "medication_alerts": alarms,
+        "alert_settings": [
+            {
+                "client_id": "c1",
+                "whatsapp_enabled": True,
+                "whatsapp_number": "9845011223",
+                "calls_enabled": True,
+                "call_number": "9845011223",
+            }
+        ],
+        "permissions": [],
+        "clients_with_access": ["c1"],
+    }
+    store = store_reading(
+        lambda request: httpx.Response(200, json=tables[request.url.path.rsplit("/", 1)[-1]])
+    )
+
+    due = await store.due_reminders(date(2026, 10, 6), time(7, 57), time(8, 2))
+
+    assert len(due) == 1
+    assert due[0].medicine.label == "Glimepiride 1 mg and Metformin 500 mg"
+
+    # And the worker sends that one alert once on each channel, not once a medicine.
+    fake, exotel = FakeStore(due), FakeExotel()
+    now = datetime(2026, 10, 6, 8, 1, tzinfo=IST)
+    await run_dose_reminders(fake, exotel, settings, now)  # type: ignore[arg-type]
+    await run_dose_reminders(fake, exotel, settings, now)  # type: ignore[arg-type]
+    assert len(exotel.messages) == 1 and len(exotel.calls) == 1
+    assert exotel.messages[0]["body_params"][1] == "Glimepiride 1 mg and Metformin 500 mg"
+
+
+async def test_a_person_gets_at_most_three_medicine_alerts_a_day() -> None:
+    # Four alert times are switched on. Only the three earliest count.
+    every = [
+        alarm_row("a1", "06:00:00", "Thyroxine"),
+        alarm_row("a2", "08:00:00", "Metformin"),
+        alarm_row("a3", "14:00:00", "Calcium"),
+        alarm_row("a4", "21:00:00", "Atorvastatin"),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.rsplit("/", 1)[-1]
+        if name == "clients_with_access":
+            return httpx.Response(200, json=["c1"])
+        if name != "medication_alerts":
+            return httpx.Response(200, json=[])
+        window = request.url.params.get("and")
+        if window is None:
+            return httpx.Response(200, json=every)  # the question "which times does c1 have?"
+        start, end = (part.split(".", 2)[2] for part in window.strip("()").split(","))
+        return httpx.Response(200, json=[row for row in every if start <= row["time"] <= end])
+
+    store = store_reading(handler)
+    day = date(2026, 10, 6)
+    sent = [
+        [item.medicine.name for item in await store.due_reminders(day, start, end)]
+        for start, end in [
+            (time(5, 57), time(6, 2)),
+            (time(7, 57), time(8, 2)),
+            (time(13, 57), time(14, 2)),
+            (time(20, 57), time(21, 2)),
+        ]
+    ]
+
+    assert sent == [["Thyroxine"], ["Metformin"], ["Calcium"], []]
+
+
+async def test_running_low_is_one_message_a_person_however_many_medicines() -> None:
+    tables: dict[str, list[Any]] = {
+        "medications": [
+            {
+                "id": "m1",
+                "client_id": "c1",
+                "name": "Metformin",
+                "strength": "500 mg",
+                "quantity": 6,
+            },
+            {"id": "m2", "client_id": "c1", "name": "Calcium", "quantity": 2},
+            {"id": "m3", "client_id": "c1", "name": "Thyroxine", "quantity": 90},
+        ],
+        "alert_settings": [
+            {"client_id": "c1", "whatsapp_enabled": True, "whatsapp_number": "9845011223"}
+        ],
+        "permissions": [],
+        "clients_with_access": ["c1"],
+    }
+    store = store_reading(
+        lambda request: httpx.Response(200, json=tables[request.url.path.rsplit("/", 1)[-1]])
+    )
+
+    low = await store.low_stock()
+
+    assert len(low) == 1
+    assert low[0].medicine.label == "Calcium and Metformin 500 mg"
+    assert low[0].days_left == 2
+
+
+async def test_one_call_names_every_medicine_taken_at_that_time() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/alert_deliveries"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "d1",
+                        "client_id": "c1",
+                        "medication_alerts": {"time": "08:00:00"},
+                        "clients": {"full_name": "Lakshmi Iyer", "language": "en"},
+                        "medications": {"name": "Metformin", "strength": "500 mg"},
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {"medications": {"name": "Metformin", "strength": "500 mg"}},
+                {"medications": {"name": "Glimepiride", "strength": "1 mg"}},
+            ],
+        )
+
+    context = await store_reading(handler).call_context("call-sid")
+
+    assert context is not None and context.count == 2
+    line = opening_line(context)
+    assert "It is time for Glimepiride 1 mg and Metformin 500 mg." in line
+    assert line.endswith("Have you taken them?")
+
+
 # --- Worker ----------------------------------------------------------------------
 
 

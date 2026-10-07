@@ -8,11 +8,15 @@ one is for, and the number to reach.
 Reminders are part of the plan. Before anything is sent, the database is asked which
 of the patients are inside their free trial or a paid month (clients_with_access).
 Nobody else is reminded.
+
+A person gets at most three medicine alerts a day (MAX_ALERTS_A_DAY). Medicines taken
+at the same time go out as one alert that names them all, and only a person's three
+earliest alert times count. Running-low news is one message a day, not one a medicine.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time
 from typing import Any, Protocol
 
@@ -24,6 +28,10 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 SCHEMA = "clinexsa"
+
+# The most medicine alerts one person is sent in a day, on each way they have switched
+# on. The website holds the same number (lib/dashboard/alertLimit.ts).
+MAX_ALERTS_A_DAY = 3
 
 
 @dataclass(frozen=True)
@@ -76,6 +84,8 @@ class CallContext:
     language: str
     medicine: Medicine
     at: time | None
+    # How many medicines this one call is for. They are all named in `medicine`.
+    count: int = 1
 
 
 class AlertStore(Protocol):
@@ -143,6 +153,13 @@ def _medicine(row: dict[str, Any] | None) -> Medicine:
     )
 
 
+def _together(labels: list[str]) -> Medicine:
+    """Several medicines as one, to be said or written: "Metformin 500 mg and Calcium"."""
+    names = sorted(set(labels))
+    said = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    return Medicine(name=said)
+
+
 def _in(ids: set[str]) -> str:
     return f"in.({','.join(sorted(ids))})"
 
@@ -186,6 +203,21 @@ class SupabaseAlertStore:
         rows = response.json()
         return {str(row) for row in rows} if isinstance(rows, list) else set()
 
+    async def _alert_times(self, ids: set[str]) -> dict[str, set[time]]:
+        """For each of these patients, the alert times that count: their three earliest."""
+        if not ids:
+            return {}
+        rows = await self._get(
+            "medication_alerts",
+            {"select": "client_id,time", "enabled": "eq.true", "client_id": _in(ids)},
+        )
+        found: dict[str, set[time]] = {}
+        for row in rows:
+            at = _time(row.get("time"))
+            if at is not None:
+                found.setdefault(str(row["client_id"]), set()).add(at)
+        return {client: set(sorted(times)[:MAX_ALERTS_A_DAY]) for client, times in found.items()}
+
     async def _by_client(self, table: str, select: str, ids: set[str]) -> dict[str, dict[str, Any]]:
         if not ids:
             return {}
@@ -214,13 +246,16 @@ class SupabaseAlertStore:
             ids,
         )
         permissions = await self._by_client("permissions", "client_id,reminders", ids)
+        counted = await self._alert_times(ids)
 
-        due: list[DueReminder] = []
+        # One alert for each person and time, however many medicines are due then.
+        due: dict[tuple[str, time], DueReminder] = {}
+        labels: dict[tuple[str, time], list[str]] = {}
         for row in rows:
             client_id = str(row["client_id"])
             at = _time(row.get("time"))
-            if at is None:
-                continue
+            if at is None or at not in counted.get(client_id, set()):
+                continue  # no time, or past the person's three alerts a day
             if permissions.get(client_id, {}).get("reminders") is False:
                 continue
             setting = settings.get(client_id, {})
@@ -231,7 +266,9 @@ class SupabaseAlertStore:
             # The two switches in the dashboard decide how a reminder goes out.
             whatsapp = setting.get("whatsapp_number") if setting.get("whatsapp_enabled") else None
             call = setting.get("call_number") if setting.get("calls_enabled") else None
-            due.append(
+            labels.setdefault((client_id, at), []).append(_medicine(row.get("medications")).label)
+            due.setdefault(
+                (client_id, at),
                 DueReminder(
                     alert_id=str(row["id"]),
                     client_id=client_id,
@@ -248,9 +285,12 @@ class SupabaseAlertStore:
                     quiet=in_quiet_hours(
                         at, _time(setting.get("quiet_start")), _time(setting.get("quiet_end"))
                     ),
-                )
+                ),
             )
-        return due
+        return [
+            replace(reminder, medicine=_together(labels[key])) if len(labels[key]) > 1 else reminder
+            for key, reminder in due.items()
+        ]
 
     async def low_stock(self) -> list[LowStock]:
         rows = await self._get(
@@ -296,7 +336,21 @@ class SupabaseAlertStore:
                     days_left=days_left,
                 )
             )
-        return low
+        # One message a person a day, naming every medicine that is running out, with
+        # the fewest days any of them has left.
+        by_client: dict[str, list[LowStock]] = {}
+        for item in low:
+            by_client.setdefault(item.client_id, []).append(item)
+        return [
+            items[0]
+            if len(items) == 1
+            else replace(
+                items[0],
+                medicine=_together([item.medicine.label for item in items]),
+                days_left=min(item.days_left for item in items),
+            )
+            for items in by_client.values()
+        ]
 
     async def claim(
         self,
@@ -354,7 +408,7 @@ class SupabaseAlertStore:
             "alert_deliveries",
             {
                 "select": (
-                    "id,medication_alerts(time),clients(full_name,language),"
+                    "id,client_id,medication_alerts(time),clients(full_name,language),"
                     "medications(name,strength,dose,unit)"
                 ),
                 "provider_sid": f"eq.{call_sid}",
@@ -366,12 +420,31 @@ class SupabaseAlertStore:
             return None
         row = rows[0]
         client = row.get("clients") or {}
+        at = _time((row.get("medication_alerts") or {}).get("time"))
+        medicine, count = _medicine(row.get("medications")), 1
+        if at is not None and row.get("client_id"):
+            # The one call is for every medicine the person takes at this time.
+            same_time = await self._get(
+                "medication_alerts",
+                {
+                    "select": "medications(name,strength,dose,unit)",
+                    "client_id": f"eq.{row['client_id']}",
+                    "enabled": "eq.true",
+                    "time": f"eq.{at.isoformat()}",
+                },
+            )
+            names = {
+                _medicine(r.get("medications")).label for r in same_time if r.get("medications")
+            }
+            if len(names) > 1:
+                medicine, count = _together(list(names)), len(names)
         return CallContext(
             delivery_id=str(row["id"]),
             first_name=_first_name(client.get("full_name")),
             language=str(client.get("language") or "en"),
-            medicine=_medicine(row.get("medications")),
-            at=_time((row.get("medication_alerts") or {}).get("time")),
+            medicine=medicine,
+            at=at,
+            count=count,
         )
 
 
