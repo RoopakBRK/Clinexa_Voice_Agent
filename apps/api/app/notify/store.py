@@ -241,11 +241,10 @@ class SupabaseAlertStore:
         rows = [row for row in rows if str(row["client_id"]) in ids]
         settings = await self._by_client(
             "alert_settings",
-            "client_id,quiet_start,quiet_end,paused_until,"
+            "client_id,reminders,quiet_start,quiet_end,paused_until,"
             "whatsapp_enabled,whatsapp_number,calls_enabled,call_number",
             ids,
         )
-        permissions = await self._by_client("permissions", "client_id,reminders", ids)
         counted = await self._alert_times(ids)
 
         # One alert for each person and time, however many medicines are due then.
@@ -256,9 +255,9 @@ class SupabaseAlertStore:
             at = _time(row.get("time"))
             if at is None or at not in counted.get(client_id, set()):
                 continue  # no time, or past the person's three alerts a day
-            if permissions.get(client_id, {}).get("reminders") is False:
-                continue
             setting = settings.get(client_id, {})
+            if setting.get("reminders") is False:
+                continue  # the person has switched reminders off
             paused = setting.get("paused_until")
             if paused and date.fromisoformat(str(paused)) >= today:
                 continue
@@ -306,15 +305,14 @@ class SupabaseAlertStore:
         rows = [row for row in rows if str(row["client_id"]) in ids]
         settings = await self._by_client(
             "alert_settings",
-            "client_id,low_stock_days,paused_until,whatsapp_enabled,whatsapp_number",
+            "client_id,low_stock_alerts,low_stock_days,paused_until,whatsapp_enabled,whatsapp_number",
             ids,
         )
-        permissions = await self._by_client("permissions", "client_id,low_stock_alerts", ids)
 
         low: list[LowStock] = []
         for row in rows:
             client_id = str(row["client_id"])
-            if permissions.get(client_id, {}).get("low_stock_alerts") is False:
+            if settings.get(client_id, {}).get("low_stock_alerts") is False:
                 continue
             per_day = float(row.get("dose") or 1) * int(row.get("times_per_day") or 1)
             if per_day <= 0:

@@ -268,7 +268,6 @@ async def test_the_two_switches_in_the_dashboard_decide_how_a_reminder_goes_out(
             {"client_id": "c2", "calls_enabled": True, "call_number": "9845099887"},
             # c3 has switched nothing on.
         ],
-        "permissions": [],
         # All three are inside their trial or a paid month.
         "clients_with_access": ["c1", "c2", "c3"],
     }
@@ -303,7 +302,6 @@ async def test_only_patients_on_a_trial_or_a_paid_month_are_reminded() -> None:
             {"id": "m2", "client_id": "lapsed", "name": "Calcium", "quantity": 2},
         ],
         "alert_settings": [],
-        "permissions": [],
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -386,7 +384,6 @@ async def test_medicines_due_at_the_same_time_go_out_as_one_alert(settings: Sett
                 "call_number": "9845011223",
             }
         ],
-        "permissions": [],
         "clients_with_access": ["c1"],
     }
     store = store_reading(
@@ -459,7 +456,6 @@ async def test_running_low_is_one_message_a_person_however_many_medicines() -> N
         "alert_settings": [
             {"client_id": "c1", "whatsapp_enabled": True, "whatsapp_number": "9845011223"}
         ],
-        "permissions": [],
         "clients_with_access": ["c1"],
     }
     store = store_reading(
