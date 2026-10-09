@@ -3,7 +3,11 @@ UV_API := uv run --project $(API)
 PORT ?= 8000
 TEXT ?= I've had a headache for three days and it's getting worse.
 
+<<<<<<< HEAD
 .PHONY: help install dev test lint format typecheck check simulate tunnel requirements ingest index query exotel-status exotel-check exotel-whatsapp
+=======
+.PHONY: help install dev test lint format typecheck check simulate tunnel requirements ingest index query medicines medicine
+>>>>>>> 5ed78ec (added the rag query for medicine catalogue)
 
 help:  ## Show available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -40,6 +44,7 @@ index:  ## Embed chunks and upsert into Qdrant (ARGS="--local" for the embedded 
 query:  ## Dense search: make query Q="cough for 5 days" ARGS="--local"
 	cd $(API) && uv run python -m app.rag.retrieval $(ARGS) query "$(Q)"
 
+<<<<<<< HEAD
 exotel-status:  ## Exotel: what is filled in, and what to paste into the Exotel dashboard
 	$(UV_API) python scripts/exotel.py status
 
@@ -48,6 +53,13 @@ exotel-check:  ## Exotel: sign in and list your ExoPhones (sends nothing)
 
 exotel-whatsapp:  ## Exotel: send the reminder template to your own number (TO=98XXXXXXXX)
 	$(UV_API) python scripts/exotel.py whatsapp $(TO)
+=======
+medicines:  ## Put the medicines catalogue in Qdrant (ARGS="--recreate" to rebuild it)
+	cd $(API) && uv run python -m app.medicines index $(ARGS)
+
+medicine:  ## What Clinexa finds for a medicine name: make medicine NAME="glycomate 500"
+	cd $(API) && uv run python -m app.medicines find "$(NAME)" $(ARGS)
+>>>>>>> 5ed78ec (added the rag query for medicine catalogue)
 
 tunnel:  ## Expose the local API to Twilio via ngrok
 	ngrok http $(PORT)

@@ -15,10 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents.responder import (
-    SYSTEM_PROMPT,
     ClaudeReplyGenerator,
     ReplyError,
     ReplyRefused,
+    build_system_prompt,
     to_messages,
 )
 from app.core.config import Settings
@@ -118,7 +118,7 @@ def test_history_maps_to_alternating_api_roles() -> None:
 
 
 def test_system_prompt_states_the_safety_scope() -> None:
-    prompt = SYSTEM_PROMPT.format(emergency="911", greeting="Hello.")
+    prompt = build_system_prompt(emergency="911", greeting="Hello.")
     for required in ("not a doctor", "do not diagnose", "do not prescribe", "call 911"):
         assert required in prompt
 

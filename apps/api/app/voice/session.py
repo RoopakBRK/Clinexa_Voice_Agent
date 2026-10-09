@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 """A single live conversation: audio in -> STT -> reply (LLM -> TTS) -> audio out.
+=======
+"""A single live phone call: Twilio audio in -> STT -> reply (LLM + lookups -> TTS) -> Twilio.
+>>>>>>> 5ed78ec (added the rag query for medicine catalogue)
 
 The WebSocket handler only parses frames and feeds audio here; STT runs in its
 own task so a slow provider never blocks frame reads. Audio is buffered in a
@@ -6,8 +10,13 @@ bounded queue, which also preserves audio while STT reconnects.
 
 Each caller utterance is answered in a separate reply task: reply text streams
 from the LLM, is cut into sentences, and each sentence is synthesised and sent
+<<<<<<< HEAD
 through the session's transport (a Twilio phone call or a browser tab) while
 the rest is still being written.
+=======
+to Twilio while the rest is still being written. What the LLM looked up to write
+it (a medicine's name, WHO guidance) is kept with the call.
+>>>>>>> 5ed78ec (added the rag query for medicine catalogue)
 """
 
 from __future__ import annotations
@@ -22,12 +31,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.agents.responder import ReplyError, ReplyGenerator
+from app.agents.responder import ReplyError, ReplyGenerator, ReplyTrace
 from app.core.config import Settings
 from app.core.logging import get_logger
-from app.graph.state import AgentName, ConversationMessage, VoiceClinicalState
+from app.graph.state import AgentName, ConversationMessage, Lookup, VoiceClinicalState
 from app.observability.metrics import LatencyMetrics, LatencyStats
-from app.schemas.clinical import Intent
+from app.schemas.clinical import Evidence, Intent
 from app.voice.providers.base import (
     TWILIO_AUDIO_FORMAT,
     AudioFormat,
@@ -63,6 +72,7 @@ class _ReplyTurn:
     first_sentence_at: float | None = None
     audio_started: bool = False
     fallback: bool = False
+    trace: ReplyTrace = field(default_factory=ReplyTrace)
 
 
 class CallStatus(StrEnum):
@@ -86,6 +96,9 @@ class CallSnapshot(BaseModel):
     escalation_required: bool
     live_transcript: str
     transcript: list[ConversationMessage]
+    # What the assistant looked up, and the guidance passages its replies drew on.
+    lookups: list[Lookup]
+    evidence: list[Evidence]
     audio_frames_received: int
     audio_frames_dropped: int
     stt_reconnects: int
@@ -245,6 +258,8 @@ class CallSession:
             escalation_required=self.state.escalation_required,
             live_transcript=self.state.current_transcript,
             transcript=list(self.state.conversation_history),
+            lookups=list(self.state.lookups),
+            evidence=list(self.state.evidence),
             audio_frames_received=self.frames_received,
             audio_frames_dropped=self.frames_dropped,
             stt_reconnects=self.stt_reconnects,
@@ -445,6 +460,7 @@ class CallSession:
         finally:
             generator.cancel()
             await asyncio.gather(generator, return_exceptions=True)
+            self._record_lookups(turn.trace)
             # Only what the caller could actually hear goes into the transcript.
             if turn.audio_started and turn.sentences:
                 text = " ".join(turn.sentences)
@@ -488,7 +504,7 @@ class CallSession:
             sentences.put_nowait(sentence)
 
         try:
-            async for delta in self._responder.stream_reply(history):
+            async for delta in self._responder.stream_reply(history, turn.trace):
                 if first_text and delta:
                     first_text = False
                     self.metrics.record("llm_ttft_ms", _ms_since(started))
@@ -542,6 +558,13 @@ class CallSession:
                 await audio.aclose()
         if turn.audio_started:
             await transport.end_of_reply(f"reply-{self.replies_spoken + 1}")
+
+    def _record_lookups(self, trace: ReplyTrace) -> None:
+        # Kept even if the reply was never heard: the lookups still happened.
+        self.state.lookups.extend(trace.lookups)
+        self.state.evidence.extend(trace.evidence)
+        for lookup in trace.lookups:
+            self.metrics.record(f"{lookup.tool}_ms", lookup.duration_ms)
 
     def _record_first_audio(self, turn: _ReplyTurn) -> None:
         now = time.monotonic()

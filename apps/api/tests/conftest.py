@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.agents.responder import ReplyGenerator
+from app.agents.responder import ReplyGenerator, ReplyTrace
 from app.core.config import Settings
 from app.graph.state import ConversationMessage
 from app.main import create_app
@@ -94,7 +94,9 @@ class FakeReplyGenerator(ReplyGenerator):
         self.gate = asyncio.Event()
         self.gate.set()
 
-    async def stream_reply(self, history: Sequence[ConversationMessage]) -> AsyncIterator[str]:
+    async def stream_reply(
+        self, history: Sequence[ConversationMessage], trace: ReplyTrace | None = None
+    ) -> AsyncIterator[str]:
         self.histories.append(list(history))
         script = self.replies[min(len(self.histories), len(self.replies)) - 1]
         for item in script:

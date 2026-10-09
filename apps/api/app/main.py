@@ -18,12 +18,19 @@ from app.agents.responder import ReplyGenerator, build_reply_generator
 from app.api import calls
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
+<<<<<<< HEAD
 from app.notify import routes as alert_routes
 from app.notify.exotel import ExotelClient, build_exotel_client
 from app.notify.scheduler import AlertScheduler
 from app.notify.store import AlertStore, build_alert_store
 from app.voice import exotel_stream, media_stream, twilio_webhook, web_stream
 from app.voice.languages import DEFAULT_VOICE, Language
+=======
+from app.medicines.lookup import MedicineLookup, build_medicine_lookup
+from app.rag.retrieval.service import GuidelineSearch, build_guideline_search
+from app.tools.knowledge import KnowledgeTools
+from app.voice import media_stream, twilio_webhook
+>>>>>>> 5ed78ec (added the rag query for medicine catalogue)
 from app.voice.providers.base import STTProvider, TTSProvider
 from app.voice.providers.factory import build_stt_provider, build_tts_provider
 from app.voice.registry import CallRegistry
@@ -39,10 +46,15 @@ def create_app(
     stt_provider: STTProvider | None = _UNSET,
     tts_provider: TTSProvider | None = _UNSET,
     reply_generator: ReplyGenerator | None = _UNSET,
+<<<<<<< HEAD
     onboarding_factory: web_stream.AgentFactory = _UNSET,
     exotel: ExotelClient | None = _UNSET,
     alert_store: AlertStore | None = _UNSET,
     sign_in: SignInCheck | None = _UNSET,
+=======
+    medicine_lookup: MedicineLookup | None = _UNSET,
+    guideline_search: GuidelineSearch | None = _UNSET,
+>>>>>>> 5ed78ec (added the rag query for medicine catalogue)
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_json)
@@ -56,8 +68,11 @@ def create_app(
             stt_provider=getattr(app.state.stt_provider, "name", None),
             tts_provider=getattr(app.state.tts_provider, "name", None),
             llm=getattr(app.state.reply_generator, "name", None),
+            medicines=app.state.medicine_lookup is not None,
+            guidelines=app.state.guideline_search is not None,
             public_base_url=settings.public_base_url,
         )
+<<<<<<< HEAD
         # The alerts worker runs here on a timer, once everything it needs is in place.
         scheduler: AlertScheduler | None = None
         if (
@@ -68,16 +83,30 @@ def create_app(
         ):
             scheduler = AlertScheduler(app.state.alert_store, app.state.exotel, settings)
             scheduler.start()
+=======
+        # Models and indexes take seconds to load, so they load in the background. Until
+        # they are in, a lookup answers that it could not be made, and the call goes on.
+        knowledge = (app.state.medicine_lookup, app.state.guideline_search)
+        for resource in knowledge:
+            if resource is not None:
+                resource.start()
+>>>>>>> 5ed78ec (added the rag query for medicine catalogue)
         yield
         if scheduler is not None:
             await scheduler.stop()
         for session in registry.sessions():
             await session.close()
             registry.finish(session.call_sid)
+<<<<<<< HEAD
         for resource in (app.state.exotel, app.state.alert_store, app.state.web_sign_in):
             close = getattr(resource, "aclose", None)
             if close is not None:
                 await close()
+=======
+        for resource in knowledge:
+            if resource is not None:
+                await resource.aclose()
+>>>>>>> 5ed78ec (added the rag query for medicine catalogue)
         log.info("app.shutdown")
 
     app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
@@ -88,8 +117,21 @@ def create_app(
     app.state.tts_provider = (
         build_tts_provider(settings) if tts_provider is _UNSET else tts_provider
     )
+
+    # What Claude can look up during a call (app/tools/knowledge.py): the Indian medicines
+    # catalogue and the WHO guidance. Only built where there is a Claude to use them, and
+    # each is None where it has nothing to search: replies then go without that lookup.
+    wanted = reply_generator is _UNSET and settings.anthropic_api_key is not None
+    if medicine_lookup is _UNSET:
+        medicine_lookup = build_medicine_lookup(settings) if wanted else None
+    if guideline_search is _UNSET:
+        guideline_search = build_guideline_search(settings) if wanted else None
+    app.state.medicine_lookup = medicine_lookup
+    app.state.guideline_search = guideline_search
+    tools = KnowledgeTools(medicines=medicine_lookup, guidelines=guideline_search)
+
     app.state.reply_generator = (
-        build_reply_generator(settings) if reply_generator is _UNSET else reply_generator
+        build_reply_generator(settings, tools) if reply_generator is _UNSET else reply_generator
     )
     app.state.call_registry = registry
     # Patient alerts (WhatsApp and voice calls through Exotel). Separate from sign-in:
@@ -147,6 +189,8 @@ def create_app(
         stt: STTProvider | None = app.state.stt_provider
         tts: TTSProvider | None = app.state.tts_provider
         llm: ReplyGenerator | None = app.state.reply_generator
+        medicines: MedicineLookup | None = app.state.medicine_lookup
+        guidelines: GuidelineSearch | None = app.state.guideline_search
         return {
             "status": "ok",
             "version": __version__,
@@ -154,6 +198,18 @@ def create_app(
             "stt": {"provider": stt.name if stt else None, "configured": stt is not None},
             "tts": {"provider": tts.name if tts else None, "configured": tts is not None},
             "llm": {"provider": llm.name if llm else None, "configured": llm is not None},
+            "knowledge": {
+                "medicines": {
+                    "configured": medicines is not None,
+                    "collection": settings.medicines_collection,
+                    "status": medicines.status if medicines else None,
+                },
+                "guidelines": {
+                    "configured": guidelines is not None,
+                    "collection": settings.qdrant_collection,
+                    "status": guidelines.status if guidelines else None,
+                },
+            },
             "active_calls": len(registry.sessions()),
         }
 

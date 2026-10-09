@@ -58,8 +58,35 @@ class Settings(BaseSettings):
     deepgram_endpointing_ms: int = Field(default=300, ge=10, le=5000)
     # Word-gap (ms) fallback for end-of-utterance when endpointing misses it.
     deepgram_utterance_end_ms: int = Field(default=1000, ge=1000, le=5000)
-    # Domain terms to boost recognition (Nova-3 keyterm prompting).
-    deepgram_keyterms: list[str] = Field(default_factory=list)
+    # Domain terms to boost recognition (Nova-3 keyterm prompting). Medicine names are
+    # what speech recognition gets wrong most, so common Indian ones are on by default.
+    deepgram_keyterms: list[str] = Field(
+        default_factory=lambda: [
+            "Paracetamol",
+            "Metformin",
+            "Glimepiride",
+            "Amlodipine",
+            "Telmisartan",
+            "Losartan",
+            "Atorvastatin",
+            "Rosuvastatin",
+            "Thyroxine",
+            "Pantoprazole",
+            "Aspirin",
+            "Clopidogrel",
+            "Amoxicillin",
+            "Azithromycin",
+            "Insulin",
+            "Dolo 650",
+            "Crocin",
+            "Glycomet",
+            "Telma",
+            "Thyronorm",
+            "Ecosprin",
+            "Pan 40",
+            "Shelcal",
+        ]
+    )
 
     # --- Deepgram (TTS) ----------------------------------------------------
     deepgram_tts_url: str = "wss://api.deepgram.com/v1/speak"
@@ -77,6 +104,9 @@ class Settings(BaseSettings):
     # Includes thinking tokens; spoken replies themselves are a few sentences.
     llm_max_tokens: int = Field(default=2048, ge=256)
     llm_timeout_s: float = Field(default=20.0, gt=0)
+    # How many times in one reply Claude may look something up (the medicines catalogue,
+    # the guidelines) before it has to answer with what it has. A caller is waiting.
+    llm_max_tool_rounds: int = Field(default=3, ge=0, le=8)
 
     # --- Web onboarding channel (Clinexsa website) ---------------------------
     # Browser origins allowed to open an onboarding session (CORS + WebSocket Origin).
@@ -203,6 +233,38 @@ class Settings(BaseSettings):
     qdrant_collection: str = "clinexa_who_primary_care"
     qdrant_timeout_s: int = Field(default=30, ge=1)
     qdrant_local_path: Path = REPO_ROOT / "data" / "indexes" / "qdrant"
+
+    # --- Guidelines in a call (app/rag/retrieval/service.py) --------------------
+    # Let Claude search the WHO knowledge base while it is on a call: dense + BM25, RRF,
+    # then the cross-encoder. Needs the chunks (make ingest) and the index (make index).
+    guidelines_retrieval: bool = True
+    # A caller is waiting while this runs. Past it, Claude is told nothing was found.
+    guidelines_timeout_s: float = Field(default=4.0, gt=0)
+
+    # --- Medicines catalogue (app/medicines) -------------------------------------
+    # The Qdrant collection that holds the Indian medicines catalogue: Jan Aushadhi, the
+    # National List of Essential Medicines 2022 and the A to Z medicines dataset of India.
+    medicines_collection: str = "clinexa_medicines"
+    # Look a medicine's name up in it when a caller says one. Needs QDRANT_URL: the
+    # embedded local index is too slow for a quarter of a million names.
+    medicines_lookup: bool = True
+    # A caller is waiting while this runs. Past it, Claude is told the name was not found.
+    medicines_lookup_timeout_s: float = Field(default=1.5, gt=0)
+    # The bi-encoder and the cross-encoder of the catalogue (app/medicines/encoders.py).
+    # Off by default: measured on the whole catalogue they did not change which medicine
+    # is found, and cost 50 to 100 ms a lookup (docs/rag.md, section 3). With this false a
+    # name is found by its spelling and sound alone, and `make medicines` stores no dense
+    # vectors. Turning it on means indexing the catalogue again with --recreate.
+    medicines_encoders: bool = False
+    # Embeds every name when the catalogue is indexed, and each name that is looked up.
+    # Change it and the catalogue has to be indexed again (make medicines ARGS="--recreate").
+    medicines_bi_encoder: str = "BAAI/bge-small-en-v1.5"
+    # Put before what was heard, not before the catalogue's names. BGE models ask for it.
+    medicines_query_instruction: str = "Represent this sentence for searching relevant passages: "
+    # Orders names the lookup's rules hold equal. Empty: no cross-encoder.
+    medicines_cross_encoder: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    # How many names the bi-encoder may add to the 64 the spelling-and-sound search finds.
+    medicines_dense_candidates: int = Field(default=16, ge=0, le=64)
 
     # --- Conversation ------------------------------------------------------
     emergency_number_phrase: str = "your local emergency number"

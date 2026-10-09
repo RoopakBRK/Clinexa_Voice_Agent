@@ -197,6 +197,15 @@ async def simulate(args: argparse.Namespace) -> None:
     print("\ntranscript:")
     for msg in call["transcript"]:
         print(f"  [{msg['role']}] {msg['content']}  (confidence={msg['stt_confidence']})")
+    if call.get("lookups"):
+        print("\nlooked up:")
+        for lookup in call["lookups"]:
+            print(f"  {lookup['tool']}: {lookup['detail']}  ({lookup['duration_ms']:.0f} ms)")
+        for source in call.get("evidence", []):
+            print(
+                f"    - {source['document_title'][:60]} | {source['section'][-60:]} "
+                f"| page {source['page_number']}"
+            )
     if listener.first_audio_at is not None:
         speech_end = t0 + len(speech) / 8000
         print(

@@ -1,6 +1,7 @@
 """LangGraph state for a voice clinical conversation.
 
-Phase 1 only populates the transcript; the graph nodes arrive in Phase 4.
+A call populates the transcript, and what was looked up to answer it (``lookups``,
+``evidence``); the graph nodes arrive in Phase 4.
 """
 
 from __future__ import annotations
@@ -41,6 +42,17 @@ class ConversationMessage(BaseModel):
     interrupted: bool = False
 
 
+class Lookup(BaseModel):
+    """One thing the assistant looked up on its way to a reply."""
+
+    tool: str
+    # How it went, in a word or two ("exact", "5 passages"). Never what the caller said.
+    detail: str = ""
+    ok: bool = True
+    duration_ms: float = 0.0
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class VoiceClinicalState(BaseModel):
     call_id: str
     patient_id: str | None = None
@@ -54,6 +66,7 @@ class VoiceClinicalState(BaseModel):
 
     retrieved_documents: list[RetrievedChunk] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
+    lookups: list[Lookup] = Field(default_factory=list)
     safety_assessment: SafetyAssessment | None = None
 
     current_agent: AgentName | None = None

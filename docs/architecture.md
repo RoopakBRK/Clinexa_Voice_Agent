@@ -1,9 +1,10 @@
 # Clinexa — Architecture
 
 Clinexa is a phone-based primary-care **information** assistant. It listens,
-collects a structured history, retrieves WHO evidence, screens for red flags, and
-routes the caller to the right next step — escalating to a clinician when needed.
-It never diagnoses, prescribes, or presents itself as a doctor.
+collects a structured history, retrieves WHO evidence, checks medicine names against
+the Indian medicines catalogue, screens for red flags, and routes the caller to the
+right next step — escalating to a clinician when needed. It never diagnoses,
+prescribes, or presents itself as a doctor.
 
 ## 1. System overview (target)
 
@@ -16,7 +17,7 @@ flowchart LR
     subgraph api[FastAPI · apps/api]
         ws[Media Stream handler] --> session[CallSession]
         session <--> stt[STTProvider<br/>Deepgram streaming]
-        session --> graph["LangGraph<br/>agent state machine<br/>(Phase 2: one Claude call)"]
+        session --> graph["LangGraph<br/>agent state machine<br/>(today: one Claude call<br/>with two lookup tools)"]
         graph --> policy[Response policy]
         policy --> tts[TTSProvider<br/>streaming]
         tts --> ws
@@ -24,9 +25,11 @@ flowchart LR
     end
 
     tools --> rag[Hybrid RAG<br/>Qdrant + BM25 → RRF → cross-encoder]
+    tools --> meds[Medicine name lookup<br/>Qdrant sparse: spelling + sound]
     tools --> pg[(PostgreSQL)]
     session <--> redis[(Redis<br/>live call state)]
     rag --> kb[(WHO knowledge base)]
+    meds --> cat[(Indian medicines catalogue<br/>NLEM 2022 · Jan Aushadhi · A to Z)]
     api -. traces .-> obs[Logfire · OpenTelemetry]
     dash[Next.js dashboard] --> api
 ```
@@ -126,7 +129,7 @@ sequenceDiagram
 | **Fixed fallback line on any LLM failure** | Error, timeout, refusal or empty output never leaves a caller in silence, and the line points them to a clinician or emergency care. |
 | **Transcript stores only what was heard** | An assistant turn is recorded once its audio has started, at the position where it was spoken, and flagged `interrupted` if cut off. |
 | **Sequential turns** | A caller who speaks during a reply gets one further reply covering everything said since. Barge-in (cancel + Twilio `clear`) is Phase 3. |
-| **`ReplyGenerator` interface** | The session depends only on `stream_reply(history) -> AsyncIterator[str]`; the LangGraph graph (Phase 4) slots in behind it. |
+| **`ReplyGenerator` interface** | The session depends only on `stream_reply(history, trace) -> AsyncIterator[str]`; the LangGraph graph (Phase 4) slots in behind it. |
 
 | Metric | Definition |
 |---|---|
@@ -137,9 +140,61 @@ sequenceDiagram
 | `response_latency_ms` | End of turn detected → first reply audio sent to Twilio. |
 | `voice_to_voice_ms` | Caller's last word → first reply audio sent to Twilio (`stt_endpoint_ms` + `response_latency_ms`). |
 
-Later phases add agent, retrieval, reranker and tool timings.
+Lookup timings are in section 4. Later phases add agent timings.
 
-## 4. Agent graph (Phase 4+)
+## 4. Lookups during a call (implemented)
+
+Claude answers with two tools (`app/tools/knowledge.py`). It decides when to call them;
+each call is one more round with the model inside the same reply.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as CallSession
+    participant L as Claude (stream)
+    participant K as KnowledgeTools
+    participant M as MedicineLookup
+    participant G as GuidelineSearch
+    participant Q as Qdrant
+
+    S->>L: conversation so far + system prompt + tool definitions
+    L-->>S: tool_use lookup_medicine("dolo 650")
+    S-->>S: speak "Let me check that medicine name."
+    S->>K: run(tool, input) — input checked first
+    K->>M: find("dolo 650")
+    M->>Q: sparse query (letters + sound), 64 names
+    Q-->>M: nearest catalogue names
+    M-->>K: Match(exact · several · close · unknown), by rule
+    K-->>L: tool_result: the catalogue's name, what it contains, what to ask
+    L-->>S: "That is Dolo 650 Tablet. It contains paracetamol…"
+    Note over L,G: search_guidelines(query, age_years, pregnant) runs the same way
+    K->>G: search(query, age, pregnant)
+    G->>Q: dense top 15 (BM25 top 15 in memory), population filter
+    G-->>K: RRF → cross-encoder → 5 passages with source and page
+```
+
+| Decision | Why |
+|---|---|
+| **The catalogue's answer, not the model's memory** | A medicine name is what speech recognition gets wrong most, and many names sound alike. The system prompt has Claude look every name up before saying anything about it. |
+| **Rules decide the match, not a model** (`app/medicines/lookup.py`) | A name is only changed to one it could have been misheard from (a letter out, or the same consonants), and a guess brings no strength or composition with it. Measured on the whole catalogue: `docs/rag.md`. |
+| **Age and pregnancy go with every guidance search** | The corpus is about 45% paediatric. Population is a hard filter, so a child is never answered from adult guidance. Claude asks the age before it searches. |
+| **A spoken line while a lookup runs** | A lookup adds a second model round. If the reply has said nothing yet, the caller hears "Let me check that…" instead of silence. |
+| **A lookup never raises** | Timeout, Qdrant down, index missing, bad input: each comes back to Claude as a `tool_result` with `is_error`, worded so it tells the caller and does not guess. |
+| **Models load in the background at start-up** | The bi-encoder, cross-encoder and BM25 index take about 20 s. Until they are in, a search answers "not available" rather than making a caller wait. |
+| **A cap on lookups per reply** (`LLM_MAX_TOOL_ROUNDS`, 3) | After the last one the request is sent with `tool_choice: none`, so the model has to answer with what it has. |
+| **Stateless across turns** | Each reply rebuilds the conversation from what was spoken. Tool exchanges live only inside the reply that made them, so no earlier turn is ever edited. |
+| **No doses read out** | Guidance passages carry doses for health workers. The prompt lets Claude name the medicine guidance recommends, and leaves the dose to a clinician or pharmacist. |
+
+| Metric | Definition |
+|---|---|
+| `lookup_medicine_ms` | One catalogue lookup, as the tool ran it. |
+| `search_guidelines_ms` | One guidance search: embed, dense + BM25, RRF, cross-encoder. |
+
+`GET /api/calls/{call_sid}` also returns `lookups` (tool, outcome, duration) and
+`evidence` (document, section, page and excerpt of each passage a reply drew on).
+What the caller asked for is never logged: only the tool and how it went.
+
+## 5. Agent graph (Phase 4+)
 
 ```mermaid
 flowchart TD
@@ -166,7 +221,7 @@ The graph state is `app.graph.state.VoiceClinicalState`; the shared contracts
 `app.schemas.clinical`. `SafetyAssessment` enforces a fail-safe invariant in the
 schema itself: `urgent`/`emergency` always sets `escalation_required`.
 
-## 5. RAG pipeline (Phases 5–8)
+## 6. RAG pipeline (Phases 5–8)
 
 ```mermaid
 flowchart LR
@@ -179,3 +234,25 @@ flowchart LR
     ce --> comp[Context compression]
     comp --> ev[Evidence set with scores]
 ```
+
+In a call today (`app/rag/retrieval/service.py`): the query is Claude's own wording
+(no separate rewrite step), the filter is population only, and compression is not
+applied. Topic filters, query rewriting and compression are built and tested, and
+wait for the LangGraph agents.
+
+### Medicines catalogue
+
+```mermaid
+flowchart LR
+    src[nlem2022.pdf · jan_aushdi.pdf<br/>A_Z_medicines_dataset_of_India.csv] --> cat[252,553 names<br/>one Qdrant point each]
+    cat --> sparse[Sparse vector: words, numbers,<br/>letter groups, sound keys · IDF]
+    heard[Name as heard] --> q[Same features] --> search[Qdrant · 64 nearest]
+    sparse --> search
+    search --> rules[Rules: exact · several · close · unknown]
+    rules --> said[What Claude is told]
+```
+
+No chunking and, by default, no model: a name is found by how it is spelt and how it
+sounds. A bi-encoder leg and a cross-encoder tie-break exist behind
+`MEDICINES_ENCODERS`; they are off because they did not change which medicine is
+found. Numbers and the reasoning are in [`rag.md`](rag.md).
