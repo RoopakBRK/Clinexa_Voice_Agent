@@ -23,7 +23,7 @@ from anthropic.types.beta import (
     BetaToolResultBlockParam,
 )
 
-from app.agents.responder import ReplyError, ReplyGenerator, ReplyRefused
+from app.agents.responder import ReplyError, ReplyGenerator, ReplyRefused, ReplyTrace
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.graph.state import ConversationMessage
@@ -277,7 +277,10 @@ class OnboardingReplyGenerator(ReplyGenerator):
         """Tell the model about something that happened on the page, on its next turn."""
         self._notes.append(f"[{note}]")
 
-    async def stream_reply(self, history: Sequence[ConversationMessage]) -> AsyncIterator[str]:
+    async def stream_reply(
+        self, history: Sequence[ConversationMessage], trace: ReplyTrace | None = None
+    ) -> AsyncIterator[str]:
+        # ``trace`` stays empty: this agent's tools fill the page's form, and look nothing up.
         self._append_user_text(self._next_user_text(history))
 
         for _ in range(self._max_tool_rounds + 1):

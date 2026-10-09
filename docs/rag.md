@@ -478,6 +478,12 @@ is the network round trip to the cluster.
 
 ### 3.7 What a lookup returns
 
+**Read section 3.8 before quoting anything here.** The 4,000 lookups in this section and
+in 3.3 were made by one-off scripts that are not in the repository, so how the names were
+changed cannot be checked and the figures cannot be reproduced. They still show what
+they were run for: that the encoders change almost nothing. A test that can be run again
+gives lower figures.
+
 The same 4,000 synthetic lookups, through the whole lookup, for the three set-ups. The
 count is of lookups where the right medicine was the one named, or was among the choices
 offered for the caller to pick from:
@@ -519,6 +525,46 @@ real catalogue (24,602 of its names, indexed in memory). `dolo 650`, `crocin adv
 their composition; `glycomet`, `azithral 500`, `augmentin 625` and `paracetamol` came back
 `several`; `glycomate 500` came back `close` to "Glycomet 500"; `shelcal 500` and a made-up
 name came back `unknown`. A spot check, not a measurement.
+
+### 3.8 A test that can be run again (9 October)
+
+`python -m app.medicines evaluate` makes its own queries from the catalogue, by rule and
+from a fixed seed, looks each one up in Qdrant by spelling and sound, and writes
+`evaluation/reports/medicines_lookup_<date>.md` with every query beside it in a `.jsonl`
+file. Run twice on 9 October against the 252,553 names in Qdrant Cloud, it gave the same
+figures both times. 4,000 queries, 1,000 of each kind, each from a different medicine:
+
+| Kind | Example | Recall@5 | Recall@10 | Recall@64 | Resolved | Not found | Wrong |
+|---|---|---|---|---|---|---|---|
+| Said correctly | `arpit 15` | 100.0% | 100.0% | 100.0% | 99.3% | 0.0% | 0.0% |
+| One letter added, dropped or changed, anywhere | `uplock 0.5` for Upclock | 87.2% | 91.3% | 97.4% | 82.3% | 8.5% | 8.5% |
+| Respelt by ear, two or three changes | `ceftavys 200` for Cefdavis | 49.1% | 55.7% | 71.1% | 29.9% | 45.0% | 24.7% |
+| One word split, or two joined | `zithr olin 150` for Zithrolin | 98.4% | 99.2% | 99.7% | 87.2% | 1.2% | 10.5% |
+| **All 4,000** | | **83.7%** | **86.6%** | **92.0%** | **74.7%** (95% interval 73.3% to 76.0%) | 13.7% | 10.9% |
+
+*Recall@k*: the medicine is among the first k names the search returns, in the search's
+own order, before any rule is applied (the lookup reads the first 64). *Resolved*: the
+lookup's rules then named it, or offered it among the choices. *Wrong*: another medicine
+was named or offered and the right one was not.
+
+What this shows:
+
+- **The search finds the name far more often than the rules accept it.** Recall@64 is 92%
+  and 75% are resolved. The rules are strict on purpose: they refuse a name that starts
+  with another sound, or differs by more than a letter without sounding the same.
+- **The first letter decides a great deal.** One letter out with the first letter kept
+  is resolved 92.9% of the time. With the first letter changed, 1.7%.
+- **Names respelt by ear are the weak point.** Two letters different: 39% resolved. Three:
+  19%. A third of these changes swap consonants (b and p, d and t, m and n), which the
+  sound key does not treat as alike.
+- **A wrong medicine is almost never stated as fact.** Of 437 wrong answers, 5 (0.1% of
+  all queries) were given as that medicine, each because the changed spelling was itself
+  another product's name. The other 432 reached the caller as a guess to confirm or as
+  choices, with nothing else said about the medicine.
+
+This test is harsher than the one in 3.7, most of all on names respelt by ear, where
+each change can be two letters and nothing keeps the first letter. Neither is real
+speech. The figure a real caller would get needs recordings to measure.
 
 ## 4. Totals at a glance
 
@@ -564,4 +610,5 @@ MEDICINES_ENCODERS=true make medicine NAME="glycomate 500"   # one lookup with b
 ```
 
 The stage-by-stage timings and the encoder comparison came from one-off scripts that call
-the same functions as those commands. They are not in the repository.
+the same functions as those commands. They are not in the repository. The lookup test in
+section 3.8 is: `python -m app.medicines evaluate` (seed 20261009 by default).

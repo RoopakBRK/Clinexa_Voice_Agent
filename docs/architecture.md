@@ -194,6 +194,28 @@ sequenceDiagram
 `evidence` (document, section, page and excerpt of each passage a reply drew on).
 What the caller asked for is never logged: only the tool and how it went.
 
+### Tracing
+
+With `LOGFIRE_TOKEN` set, the same steps are traced to Pydantic Logfire over
+OpenTelemetry (`app/observability/tracing.py`). The code is instrumented with the
+OpenTelemetry API only, so the spans are no-ops until Logfire is configured as the
+provider, and another backend could take its place.
+
+| Span | From | Attributes |
+|---|---|---|
+| `/twilio/media-stream`, `POST /twilio/voice`, ... | FastAPI instrumentation | method, route, status. No headers, bodies or endpoint arguments |
+| `reply` | `CallSession._reply_loop` | `call_sid`, `sentences`, `lookups`, `fallback`, `audio_started` |
+| `llm round` | `ClaudeReplyGenerator.stream_reply` | `model`, `round`, `stop_reason`, token counts |
+| `tool <name>` | `KnowledgeTools.run` | `tool`, `ok`, `detail` |
+| `medicines lookup` | `MedicineLookup.find` | `status` |
+| `guidelines search` | `GuidelineSearch.search` | `passages`, `population`, `filter_relaxed`, stage timings |
+
+| Decision | Why |
+|---|---|
+| **No caller content in any span** | Transcripts, tool arguments and medicine names are health information, and a tracing service is somebody else's server. The rule is the one the logs follow, and a test searches every exported span for it. |
+| **Endpoints with a secret in their address are not traced** | The Exotel callbacks carry a key and the web stream a session token in the query string, which request tracing would record. |
+| **The Claude request's span is never made current** | The reply is an async generator that yields while the request is open, and can be closed from another task. A span it had made current could not be put back. |
+
 ## 5. Agent graph (Phase 4+)
 
 ```mermaid

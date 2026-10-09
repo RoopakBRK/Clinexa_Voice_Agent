@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.core.logging import get_logger
 from app.medicines.lookup import Match
+from app.observability.tracing import tracer
 from app.rag.retrieval.service import GuidelineResult
 from app.schemas.clinical import Evidence, RetrievedChunk
 
@@ -282,6 +283,13 @@ class KnowledgeTools:
         return _FILLERS.get(tools[0], _FILLER) if len(set(tools)) == 1 else _FILLER
 
     async def run(self, name: str, arguments: Mapping[str, Any]) -> ToolOutcome:
+        # The span carries the tool and how it went. Never the arguments.
+        with tracer.start_as_current_span(f"tool {name}", attributes={"tool": name}) as span:
+            outcome = await self._run(name, arguments)
+            span.set_attributes({"ok": not outcome.is_error, "detail": outcome.detail})
+            return outcome
+
+    async def _run(self, name: str, arguments: Mapping[str, Any]) -> ToolOutcome:
         started = time.perf_counter()
         try:
             if name == LOOKUP_MEDICINE and self._medicines is not None:

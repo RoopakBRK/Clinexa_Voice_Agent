@@ -3,8 +3,13 @@
     python -m app.medicines build                  read the three files, print what was found
     python -m app.medicines index [--recreate]     put the catalogue in Qdrant
     python -m app.medicines find "glycomate 500"   what Clinexa finds for a name
+    python -m app.medicines evaluate               how often a name said wrongly is still found
 
-``index`` and ``find`` use the Qdrant in QDRANT_URL. With ``--local`` they use the embedded
+``evaluate`` makes its queries by rule from the catalogue's own names, looks each one up
+and writes a report to evaluation/reports (app/medicines/evaluation.py). Same seed, same
+queries, so a number in the report can be checked by running it again.
+
+``index``, ``find`` and ``evaluate`` use the Qdrant in QDRANT_URL. With ``--local`` they use the embedded
 index under data/indexes instead, which is for trying things out: it reads every name for
 every lookup, so pass ``--limit`` to keep it small.
 
@@ -20,13 +25,23 @@ import asyncio
 import sys
 import time
 from collections import Counter
+from datetime import UTC, datetime
 
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
-from app.core.config import get_settings
+from app.core.config import REPO_ROOT, get_settings
 from app.core.logging import configure_logging
 from app.medicines.catalog import SOURCE_NAMES, Medicine, load_catalog
 from app.medicines.encoders import NameEncoders, build_encoders
+from app.medicines.evaluation import (
+    CUTOFFS,
+    KIND_NAMES,
+    KINDS,
+    make_queries,
+    render,
+    run,
+    tally,
+)
 from app.medicines.lookup import MedicineLookup
 from app.medicines.store import MedicineStore
 from app.rag.retrieval.qdrant_store import build_client
@@ -125,6 +140,58 @@ async def _find(args: argparse.Namespace) -> None:
     await lookup.aclose()
 
 
+async def _evaluate(args: argparse.Namespace) -> None:
+    store = _store(args.local)
+    if not await store.exists():
+        sys.exit(f"There is no '{store.collection}' collection yet. Run: make medicines")
+    medicines = _catalog(None)
+    names = await store.count()
+    if names != len(medicines):
+        # A query made from a name that was never indexed can only miss.
+        sys.exit(
+            f"'{store.collection}' holds {names:,} names and the files hold {len(medicines):,}. "
+            "Index the whole catalogue first: make medicines"
+        )
+    queries = make_queries(medicines, args.per_kind, args.seed)
+    print(
+        f"Looking up {len(queries):,} queries ({args.per_kind:,} of each kind, seed {args.seed})..."
+    )
+    started = time.perf_counter()
+
+    def progress(done: int, total: int) -> None:
+        if done % 500 == 0 or done == total:
+            print(f"  {done:>6,} of {total:,}", flush=True)
+
+    results = await run(store, queries, concurrency=args.concurrency, progress=progress)
+    took = time.perf_counter() - started
+    await store.client.close()
+
+    day = f"{datetime.now(UTC):%Y-%m-%d}"
+    out = REPO_ROOT / "evaluation" / "reports" / f"medicines_lookup_{day}"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    report = render(results, seed=args.seed, collection=store.collection, names=names, day=day)
+    out.with_suffix(".md").write_text(report + "\n", encoding="utf-8")
+    out.with_suffix(".jsonl").write_text(
+        "".join(result.model_dump_json() + "\n" for result in results), encoding="utf-8"
+    )
+
+    recall = " ".join(f"{f'recall@{k}':>10}" for k in CUTOFFS)
+    print(f"\n{'':18} {recall} {'resolved':>9} {'named':>7} {'offered':>8} {'wrong':>6}")
+    groups = [(KIND_NAMES[kind], [r for r in results if r.query.kind == kind]) for kind in KINDS]
+    groups.append(("Misheard kinds", [r for r in results if r.query.kind != "said"]))
+    groups.append(("All", list(results)))
+    for label, group in groups:
+        counted = tally(group)
+        total = counted.queries
+        within = " ".join(f"{counted.within[k] / total:>10.1%}" for k in CUTOFFS)
+        print(
+            f"{label:18} {within} {counted.resolved / total:>9.1%} "
+            f"{counted.outcomes['named'] / total:>7.1%} {counted.outcomes['offered'] / total:>8.1%} "
+            f"{counted.outcomes['wrong'] / total:>6.1%}"
+        )
+    print(f"\n{len(results):,} lookups in {took:.0f}s. Report: {out.with_suffix('.md')}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="python -m app.medicines", description=__doc__.split("\n")[0]
@@ -135,6 +202,11 @@ def main() -> None:
     index.add_argument("--recreate", action="store_true", help="empty the collection first")
     find = commands.add_parser("find", help="what Clinexa finds for a name")
     find.add_argument("names", nargs="+")
+    evaluate = commands.add_parser("evaluate", help="how often a name said wrongly is found")
+    evaluate.add_argument("--per-kind", type=int, default=1000, help="queries of each kind")
+    evaluate.add_argument("--seed", type=int, default=20261009, help="same seed, same queries")
+    evaluate.add_argument("--concurrency", type=int, default=8, help="lookups at a time")
+    evaluate.add_argument("--local", action="store_true", help="use the embedded index")
     for command in (index, find):
         command.add_argument("--local", action="store_true", help="use the embedded index")
         command.add_argument(
@@ -150,7 +222,7 @@ def main() -> None:
         _catalog(None)
         return
     try:
-        asyncio.run(_index(args) if args.command == "index" else _find(args))
+        asyncio.run({"index": _index, "find": _find, "evaluate": _evaluate}[args.command](args))
     except (ResponseHandlingException, UnexpectedResponse, OSError) as exc:
         host = (get_settings().qdrant_url or "").split("//")[-1]
         sys.exit(

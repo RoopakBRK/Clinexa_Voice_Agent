@@ -41,6 +41,7 @@ from app.medicines.text import (
     is_number,
     near,
 )
+from app.observability.tracing import tracer
 from app.rag.retrieval.qdrant_store import build_client
 
 log = get_logger(__name__)
@@ -411,6 +412,13 @@ class MedicineLookup:
 
     async def find(self, heard: str) -> Match | None:
         """The match for a name, or None if the catalogue could not be asked."""
+        # The span says how the lookup went. The name is health information and is not in it.
+        with tracer.start_as_current_span("medicines lookup") as span:
+            match = await self._find(heard)
+            span.set_attribute("status", match.status if match else "unavailable")
+            return match
+
+    async def _find(self, heard: str) -> Match | None:
         heard = " ".join(heard.split())[:120]
         if not heard or self.status == "not_indexed" or time.monotonic() < self._resume_at:
             return None

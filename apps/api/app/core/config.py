@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     deepgram_tts_url: str = "wss://api.deepgram.com/v1/speak"
     deepgram_tts_model: str = "aura-2-thalia-en"
 
+    # --- Tracing (app/observability/tracing.py) --------------------------------
+    # Write token of a Pydantic Logfire project. Unset: no trace is sent anywhere.
+    logfire_token: SecretStr | None = None
+    logfire_service_name: str = "clinexa-api"
+
     # --- LLM (Anthropic Claude) ----------------------------------------------
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str = "claude-opus-5-5"
@@ -285,6 +290,7 @@ class Settings(BaseSettings):
         "qdrant_api_key",
         "embedding_device",
         "anthropic_api_key",
+        "logfire_token",
         "llm_effort",
         "exotel_api_key",
         "exotel_api_token",

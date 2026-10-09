@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 
-from app.agents.responder import ClaudeReplyGenerator, ReplyGenerator
+from app.agents.responder import ClaudeReplyGenerator, ReplyGenerator, ReplyTrace
 from app.core.config import Settings
 from app.graph.state import ConversationMessage
 from app.notify.store import CallContext
@@ -69,7 +69,9 @@ class ReminderReplyGenerator(ReplyGenerator):
         self._opening = opening_line(context)
         self._inner = inner
 
-    async def stream_reply(self, history: Sequence[ConversationMessage]) -> AsyncIterator[str]:
+    async def stream_reply(
+        self, history: Sequence[ConversationMessage], trace: ReplyTrace | None = None
+    ) -> AsyncIterator[str]:
         if not any(message.role == "patient" for message in history):
             yield self._opening
             return
@@ -77,7 +79,7 @@ class ReminderReplyGenerator(ReplyGenerator):
             # No model is configured: still end the call politely.
             yield REMINDER_FALLBACK
             return
-        async for text in self._inner.stream_reply(history):
+        async for text in self._inner.stream_reply(history, trace):
             yield text
 
 

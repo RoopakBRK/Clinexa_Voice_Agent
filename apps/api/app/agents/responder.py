@@ -33,6 +33,7 @@ from anthropic.types.beta import (
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.graph.state import ConversationMessage, Lookup
+from app.observability.tracing import detached_span
 from app.schemas.clinical import Evidence
 from app.tools.knowledge import LOOKUP_MEDICINE, SEARCH_GUIDELINES, KnowledgeTools
 
@@ -257,36 +258,46 @@ class ClaudeReplyGenerator(ReplyGenerator):
             # Past the last lookup the model has to answer with what it has.
             answer_now = tools is not None and round_number == self._max_tool_rounds
             ends_in_space = True
-            try:
-                async with self._client.beta.messages.stream(
-                    model=self._model,
-                    max_tokens=self._max_tokens,
-                    system=self._system,
-                    messages=messages,
-                    tools=tools.definitions if tools else anthropic.omit,
-                    tool_choice={"type": "none"} if answer_now else anthropic.omit,
-                    # Caches the growing conversation prefix once it is long enough to qualify.
-                    cache_control={"type": "ephemeral"},
-                    output_config=self._output_config,
-                    betas=[_FALLBACK_BETA] if self._refusal_fallback else anthropic.omit,
-                    fallbacks="default" if self._refusal_fallback else anthropic.omit,
-                ) as stream:
-                    async for text in stream.text_stream:
-                        if text:
-                            spoken, ends_in_space = True, text[-1].isspace()
-                        yield text
-                    final = await stream.get_final_message()
-            except anthropic.APITimeoutError as exc:
-                raise ReplyError("Claude request timed out") from exc
-            except anthropic.APIConnectionError as exc:
-                raise ReplyError(f"could not reach the Claude API: {exc!r}") from exc
-            except anthropic.RateLimitError as exc:
-                raise ReplyError("Claude API rate limit reached") from exc
-            except anthropic.APIStatusError as exc:
-                raise ReplyError(f"Claude API error {exc.status_code}: {exc.message}") from exc
-            except ValueError as exc:
-                # Tool input streams as it is written, and this one was not readable JSON.
-                raise ReplyError("Claude sent a tool call that could not be read") from exc
+            # Not made the current span: this generator yields while the request is open.
+            with detached_span("llm round", model=self._model, round=round_number) as span:
+                try:
+                    async with self._client.beta.messages.stream(
+                        model=self._model,
+                        max_tokens=self._max_tokens,
+                        system=self._system,
+                        messages=messages,
+                        tools=tools.definitions if tools else anthropic.omit,
+                        tool_choice={"type": "none"} if answer_now else anthropic.omit,
+                        # Caches the growing conversation prefix once it is long enough to qualify.
+                        cache_control={"type": "ephemeral"},
+                        output_config=self._output_config,
+                        betas=[_FALLBACK_BETA] if self._refusal_fallback else anthropic.omit,
+                        fallbacks="default" if self._refusal_fallback else anthropic.omit,
+                    ) as stream:
+                        async for text in stream.text_stream:
+                            if text:
+                                spoken, ends_in_space = True, text[-1].isspace()
+                            yield text
+                        final = await stream.get_final_message()
+                except anthropic.APITimeoutError as exc:
+                    raise ReplyError("Claude request timed out") from exc
+                except anthropic.APIConnectionError as exc:
+                    raise ReplyError(f"could not reach the Claude API: {exc!r}") from exc
+                except anthropic.RateLimitError as exc:
+                    raise ReplyError("Claude API rate limit reached") from exc
+                except anthropic.APIStatusError as exc:
+                    raise ReplyError(f"Claude API error {exc.status_code}: {exc.message}") from exc
+                except ValueError as exc:
+                    # Tool input streams as it is written, and this one was not readable JSON.
+                    raise ReplyError("Claude sent a tool call that could not be read") from exc
+                span.set_attributes(
+                    {
+                        "stop_reason": final.stop_reason or "unknown",
+                        "input_tokens": final.usage.input_tokens,
+                        "output_tokens": final.usage.output_tokens,
+                        "cache_read_tokens": final.usage.cache_read_input_tokens or 0,
+                    }
+                )
 
             if final.stop_reason == "refusal":
                 category = final.stop_details.category if final.stop_details else None

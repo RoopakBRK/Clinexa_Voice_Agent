@@ -6,6 +6,8 @@ import asyncio
 import base64
 import importlib.util
 import json
+import subprocess
+import sys
 import time
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
@@ -906,6 +908,58 @@ def test_the_server_gives_claude_the_lookups_it_has_and_reports_them(settings: S
             },
         }
     assert (medicines.closed, guidelines.closed) == (1, 1)
+
+
+_START_WITHOUT_THE_MODEL_LIBRARIES = """
+import importlib.abc, importlib.util, sys
+
+LEFT_OUT = {"torch", "triton", "sentence_transformers", "transformers", "tokenizers",
+            "sklearn", "scipy", "nvidia"}
+
+class Missing(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in LEFT_OUT:
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return None
+
+sys.meta_path.insert(0, Missing())
+real = importlib.util.find_spec
+importlib.util.find_spec = (
+    lambda name, *more: None if name.split(".")[0] in LEFT_OUT else real(name, *more)
+)
+
+from pydantic import SecretStr
+from app.core.config import Settings
+from app.main import create_app
+
+settings = Settings(
+    _env_file=None,
+    anthropic_api_key=SecretStr("sk-test"),
+    deepgram_api_key=None,
+    qdrant_url="https://example.invalid:6333",
+)
+app = create_app(settings, stt_provider=None, tts_provider=None)
+assert app.state.guideline_search is None, "the guidance search needs the models"
+assert app.state.medicine_lookup is not None, "the medicines lookup needs no model"
+assert app.state.reply_generator._tools.names == ["lookup_medicine"]
+assert not LEFT_OUT & {name.split(".")[0] for name in sys.modules}
+print("started")
+"""
+
+
+def test_the_server_starts_where_the_model_libraries_are_left_out() -> None:
+    # The production image (Dockerfile) leaves out PyTorch and the libraries around it.
+    # The server has to import and start there all the same, with the guidance search off
+    # and everything else as usual. Run in a process of its own, with those libraries hidden.
+    done = subprocess.run(
+        [sys.executable, "-c", _START_WITHOUT_THE_MODEL_LIBRARIES],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert done.stdout.strip().endswith("started")
 
 
 def test_without_a_claude_nothing_is_opened_to_look_things_up_in(settings: Settings) -> None:

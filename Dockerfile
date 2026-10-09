@@ -12,10 +12,12 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy PYTHONUNBUFFERED=1
 WORKDIR /srv/apps/api
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
 
-# The knowledge-base code (app/rag) is not used by the running server: nothing a call or a
-# web session touches imports it. Its libraries are PyTorch and the NVIDIA runtime, several
-# gigabytes, so they are left out of this image. The names are read from the lock file.
-# When app/rag is wired into the conversation, delete the $(...) part of this command.
+# The WHO guidance search (app/rag) runs two models through PyTorch. PyTorch and the NVIDIA
+# runtime are several gigabytes, so they are left out of this image. The server starts
+# without them, and that one lookup is then not offered to Claude on phone calls here. Web
+# sessions and the medicines lookup need none of them. The names are read from the lock
+# file. To have the guidance search in this image too, delete the $(...) part of this
+# command (tests/test_knowledge.py checks the server still starts with them left out).
 RUN uv sync --frozen --no-dev --no-install-project \
     $(grep -oE '^name = "(nvidia-[a-z0-9-]+|torch|triton|sentence-transformers|transformers|tokenizers|scikit-learn|scipy)"' uv.lock \
       | cut -d'"' -f2 | sort -u | sed 's/^/--no-install-package /')

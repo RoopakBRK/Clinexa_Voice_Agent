@@ -23,6 +23,7 @@ from qdrant_client import AsyncQdrantClient
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.observability.tracing import tracer
 from app.rag.embeddings import SentenceTransformerEmbedder
 from app.rag.reranking.cross_encoder import CrossEncoderReranker, Reranker, arerank
 from app.rag.retrieval.dense import DenseRetriever
@@ -100,6 +101,24 @@ class GuidelineSearch:
         ``age`` and ``pregnant`` hold the search to guidance written for that person: a
         child is never answered from adult guidance, nor an adult from a child's.
         """
+        with tracer.start_as_current_span("guidelines search") as span:
+            result = await self._search(query, age=age, pregnant=pregnant)
+            span.set_attribute("searched", result is not None)
+            if result is not None:
+                # How long each stage took, and how much came back. Not the question.
+                span.set_attributes(
+                    {
+                        "passages": len(result.passages),
+                        "population": result.population or ["any"],
+                        "filter_relaxed": result.filter_relaxed,
+                        **result.timings_ms,
+                    }
+                )
+            return result
+
+    async def _search(
+        self, query: str, *, age: int | None, pregnant: bool | None
+    ) -> GuidelineResult | None:
         pipeline = self._pipeline
         if pipeline is None:
             return None

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-"""A single live conversation: audio in -> STT -> reply (LLM -> TTS) -> audio out.
-=======
-"""A single live phone call: Twilio audio in -> STT -> reply (LLM + lookups -> TTS) -> Twilio.
->>>>>>> 5ed78ec (added the rag query for medicine catalogue)
+"""A single live conversation: audio in -> STT -> reply (LLM + lookups -> TTS) -> audio out.
 
 The WebSocket handler only parses frames and feeds audio here; STT runs in its
 own task so a slow provider never blocks frame reads. Audio is buffered in a
@@ -10,13 +6,9 @@ bounded queue, which also preserves audio while STT reconnects.
 
 Each caller utterance is answered in a separate reply task: reply text streams
 from the LLM, is cut into sentences, and each sentence is synthesised and sent
-<<<<<<< HEAD
 through the session's transport (a Twilio phone call or a browser tab) while
-the rest is still being written.
-=======
-to Twilio while the rest is still being written. What the LLM looked up to write
-it (a medicine's name, WHO guidance) is kept with the call.
->>>>>>> 5ed78ec (added the rag query for medicine catalogue)
+the rest is still being written. What the LLM looked up to write it (a
+medicine's name, WHO guidance) is kept with the call.
 """
 
 from __future__ import annotations
@@ -36,6 +28,7 @@ from app.core.config import Settings
 from app.core.logging import get_logger
 from app.graph.state import AgentName, ConversationMessage, Lookup, VoiceClinicalState
 from app.observability.metrics import LatencyMetrics, LatencyStats
+from app.observability.tracing import tracer
 from app.schemas.clinical import Evidence, Intent
 from app.voice.providers.base import (
     TWILIO_AUDIO_FORMAT,
@@ -392,8 +385,24 @@ class CallSession:
     async def _reply_loop(self) -> None:
         while (due := self._reply_due) is not None:
             self._reply_due = None
+            turn = _ReplyTurn(heard_at=due[0], endpoint_latency_ms=due[1])
             try:
-                await self._reply(_ReplyTurn(heard_at=due[0], endpoint_latency_ms=due[1]))
+                # The LLM task is started inside this span, so its requests and lookups
+                # are traced under the reply they belong to.
+                with tracer.start_as_current_span(
+                    "reply", attributes={"call_sid": self.call_sid}
+                ) as span:
+                    try:
+                        await self._reply(turn)
+                    finally:
+                        span.set_attributes(
+                            {
+                                "sentences": len(turn.sentences),
+                                "lookups": len(turn.trace.lookups),
+                                "fallback": turn.fallback,
+                                "audio_started": turn.audio_started,
+                            }
+                        )
             except Exception:
                 log.exception("reply.failed")
         if self._transport is not None:

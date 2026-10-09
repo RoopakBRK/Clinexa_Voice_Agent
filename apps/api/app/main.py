@@ -18,19 +18,21 @@ from app.agents.responder import ReplyGenerator, build_reply_generator
 from app.api import calls
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
-<<<<<<< HEAD
+from app.medicines.lookup import MedicineLookup, build_medicine_lookup
 from app.notify import routes as alert_routes
 from app.notify.exotel import ExotelClient, build_exotel_client
 from app.notify.scheduler import AlertScheduler
 from app.notify.store import AlertStore, build_alert_store
-from app.voice import exotel_stream, media_stream, twilio_webhook, web_stream
-from app.voice.languages import DEFAULT_VOICE, Language
-=======
-from app.medicines.lookup import MedicineLookup, build_medicine_lookup
+from app.observability.tracing import (
+    configure_tracing,
+    flush_tracing,
+    instrument_app,
+    tracing_enabled,
+)
 from app.rag.retrieval.service import GuidelineSearch, build_guideline_search
 from app.tools.knowledge import KnowledgeTools
-from app.voice import media_stream, twilio_webhook
->>>>>>> 5ed78ec (added the rag query for medicine catalogue)
+from app.voice import exotel_stream, media_stream, twilio_webhook, web_stream
+from app.voice.languages import DEFAULT_VOICE, Language
 from app.voice.providers.base import STTProvider, TTSProvider
 from app.voice.providers.factory import build_stt_provider, build_tts_provider
 from app.voice.registry import CallRegistry
@@ -46,18 +48,16 @@ def create_app(
     stt_provider: STTProvider | None = _UNSET,
     tts_provider: TTSProvider | None = _UNSET,
     reply_generator: ReplyGenerator | None = _UNSET,
-<<<<<<< HEAD
     onboarding_factory: web_stream.AgentFactory = _UNSET,
     exotel: ExotelClient | None = _UNSET,
     alert_store: AlertStore | None = _UNSET,
     sign_in: SignInCheck | None = _UNSET,
-=======
     medicine_lookup: MedicineLookup | None = _UNSET,
     guideline_search: GuidelineSearch | None = _UNSET,
->>>>>>> 5ed78ec (added the rag query for medicine catalogue)
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_json)
+    configure_tracing(settings)
     registry = CallRegistry()
 
     @asynccontextmanager
@@ -72,7 +72,6 @@ def create_app(
             guidelines=app.state.guideline_search is not None,
             public_base_url=settings.public_base_url,
         )
-<<<<<<< HEAD
         # The alerts worker runs here on a timer, once everything it needs is in place.
         scheduler: AlertScheduler | None = None
         if (
@@ -83,30 +82,26 @@ def create_app(
         ):
             scheduler = AlertScheduler(app.state.alert_store, app.state.exotel, settings)
             scheduler.start()
-=======
         # Models and indexes take seconds to load, so they load in the background. Until
         # they are in, a lookup answers that it could not be made, and the call goes on.
         knowledge = (app.state.medicine_lookup, app.state.guideline_search)
         for resource in knowledge:
             if resource is not None:
                 resource.start()
->>>>>>> 5ed78ec (added the rag query for medicine catalogue)
         yield
         if scheduler is not None:
             await scheduler.stop()
         for session in registry.sessions():
             await session.close()
             registry.finish(session.call_sid)
-<<<<<<< HEAD
         for resource in (app.state.exotel, app.state.alert_store, app.state.web_sign_in):
             close = getattr(resource, "aclose", None)
             if close is not None:
                 await close()
-=======
         for resource in knowledge:
             if resource is not None:
                 await resource.aclose()
->>>>>>> 5ed78ec (added the rag query for medicine catalogue)
+        flush_tracing()
         log.info("app.shutdown")
 
     app = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
@@ -183,6 +178,8 @@ def create_app(
     app.include_router(calls.router)
     app.include_router(alert_routes.router)
     app.include_router(exotel_stream.router)
+    # Last, so that it wraps everything above. A no-op unless LOGFIRE_TOKEN is set.
+    instrument_app(app)
 
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, Any]:
@@ -209,6 +206,10 @@ def create_app(
                     "collection": settings.qdrant_collection,
                     "status": guidelines.status if guidelines else None,
                 },
+            },
+            "tracing": {
+                "provider": "logfire" if tracing_enabled() else None,
+                "configured": tracing_enabled(),
             },
             "active_calls": len(registry.sessions()),
         }

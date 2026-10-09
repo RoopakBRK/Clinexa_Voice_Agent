@@ -33,7 +33,8 @@ what the retrieval pipelines hold and how they measure: **[docs/rag.md](docs/rag
 | 3 | Endpointing tuning, barge-in, persistent TTS connection | |
 | 4 | LangGraph state machine | |
 | 9–12 | Intake · red-flag safety · human escalation agents (medicine and guidance lookups already work as tools) | |
-| 13–14 | Redis + PostgreSQL memory · observability | |
+| 14 | Tracing to Pydantic Logfire over OpenTelemetry | ✅ done: each call is one trace (replies, Claude requests, lookups), with no caller content in it |
+| 13 | Redis + PostgreSQL memory | |
 | 15 | RAG + safety evaluation | |
 | 16–17 | Next.js dashboard · Docker + deployment | |
 
@@ -100,7 +101,99 @@ caller utterance ─▶ Claude (streamed text) ─▶ sentence chunker ─▶ De
   (caller's last word → first reply audio sent).
 - Without `ANTHROPIC_API_KEY` (or with no TTS provider) calls are transcribed only, as in Phase 1.
 
-<<<<<<< HEAD
+## Tracing (Logfire)
+
+Set `LOGFIRE_TOKEN` and every call becomes one trace in Pydantic Logfire, sent over
+OpenTelemetry (`app/observability/tracing.py`). Without the token nothing is sent.
+
+```
+/twilio/media-stream            the call
+  reply                         one spoken answer: sentences, lookups, fallback or not
+    llm round                   one request to Claude: model, stop reason, token counts
+    tool lookup_medicine        ok, and how it went (exact, several, close, unknown)
+      medicines lookup
+    tool search_guidelines      ok, and how many passages
+      guidelines search         dense, BM25, RRF and cross-encoder timings
+```
+
+A span says what ran, how long it took and how it went. What a caller said, what Claude
+asked a tool, medicine names, request headers and endpoint arguments are never put in one,
+and the endpoints whose address carries a secret (`/exotel/...`, `/web/onboarding-stream`)
+are not traced at all. `tests/test_tracing.py` checks each of these. `/health` reports
+whether tracing is on.
+
+## Lookups on a call: medicine names and WHO guidance
+
+```
+caller: "I take glycomate five hundred"
+   │
+   ▼
+Claude ──tool_use lookup_medicine("glycomate 500")──▶ medicines catalogue (Qdrant, 252,553 names)
+   │        caller hears "Let me check that medicine name."      found by spelling and sound
+   │◀─tool_result: not in the catalogue as heard; "Glycomet 500" is, and sounds like it ──┘
+   ▼
+"Did you mean Glycomet 500?"                     …and for a health question:
+
+Claude ──tool_use search_guidelines(query, age_years, pregnant)──▶ dense + BM25 → RRF → cross-encoder
+   │◀─tool_result: 5 passages, each under its document, section and page ──┘   filtered by population
+   ▼
+"World Health Organization guidance says…"
+```
+
+Claude decides when to look something up (`app/tools/knowledge.py`). Two tools:
+
+| Tool | What it searches | What Claude gets back |
+|---|---|---|
+| `lookup_medicine` | The Indian medicines catalogue: National List of Essential Medicines 2022, the Jan Aushadhi (PMBJP) list and the A to Z medicines dataset of India | The catalogue's spelling of the name, what the medicine contains, its strength and form where every product of that name agrees, or the products the name could mean |
+| `search_guidelines` | The WHO knowledge base, with the full hybrid + rerank pipeline below | Up to five passages, each with its document, publisher, section and page |
+
+- **A medicine is looked up before anything is said about it.** Medicine names are what speech
+  recognition gets wrong most. The catalogue is searched by letters and sound, so "glycomate" finds
+  Glycomet and "eco sprin" finds Ecosprin, with no model in the path.
+- **Rules decide the match** (`app/medicines/lookup.py`): the name as said (`exact`), a brand with
+  several products (`several`, and Claude asks which is on the strip), a name it could have been misheard
+  from (`close`, said back to confirm, with nothing else claimed about it), or not there (`unknown`). A
+  name that is merely like another is never swapped for it: the catalogue does not hold every medicine.
+- **Guidance is searched for the person asked about.** Claude asks their age first and passes it, and
+  pregnancy, with the search. Population is a hard filter: a child is never answered from adult guidance.
+- **No doses over the phone.** Passages carry doses for health workers. Claude may name the medicine
+  guidance recommends; the dose is left to a clinician or pharmacist.
+- **A caller is not left in silence.** A lookup means a second round with Claude, so a short line is
+  spoken while it runs. A lookup that fails, times out or has no index comes back to Claude as an error
+  it reports to the caller; it never guesses instead.
+- **What was looked up stays with the call.** `GET /api/calls/{call_sid}` returns `lookups` (tool,
+  outcome, duration) and `evidence` (document, section, page, excerpt), and latency gains
+  `lookup_medicine_ms` and `search_guidelines_ms`. Logs carry the tool and how it went, never what the
+  caller asked.
+
+Both stores live in the Qdrant named by `QDRANT_URL` and have to be filled once:
+
+```bash
+make index                            # WHO chunks → collection clinexa_who_primary_care
+make medicines                        # medicines catalogue → collection clinexa_medicines (about 3 minutes to Qdrant Cloud)
+make medicine NAME="glycomate 500"    # try one name against the catalogue
+curl localhost:8000/health            # "knowledge" shows each store's status
+```
+
+Without `QDRANT_URL` the WHO search uses the embedded local index (`make index ARGS="--local"`) and
+the medicine lookup is switched off: a quarter of a million names are too many for the embedded index.
+
+## Medicines catalogue
+
+| Source (`data/`) | Entries read | Names kept |
+|---|---|---|
+| `nlem2022.pdf`: National List of Essential Medicines 2022 | 1,348 | 1,155 |
+| `jan_aushdi.pdf`: Jan Aushadhi (PMBJP) product list | 2,111 | 2,088 |
+| `A_Z_medicines_dataset_of_India.csv` | 253,973 | 249,310 |
+| **Total**, one entry for each name | 257,432 | **252,553** |
+
+One Qdrant point for each name, no chunking. Each carries a sparse vector made of its words, numbers,
+three-letter groups and a sound key for each word, weighted by Qdrant's IDF, plus the medicine as
+payload (composition, strength, form, pack, manufacturer, source). A bi-encoder leg and a cross-encoder
+tie-break exist behind `MEDICINES_ENCODERS=true`; they are off by default because, measured on the
+whole catalogue, they did not change which medicine is found. The comparison is in
+[docs/rag.md](docs/rag.md).
+
 ## Roopiee on the website: the browser channel
 
 The Clinexsa website's "Onboarding for Patient" page talks to the same pipeline over a
@@ -186,86 +279,14 @@ curl -X POST https://clinexsa-roopiee.fly.dev/web/session \
 Things to know:
 - **One machine only.** Session tokens and the per-address rate limit live in the
   process's memory. Do not scale to two.
-- **The image leaves out the knowledge-base libraries** (PyTorch and the NVIDIA runtime,
-  several gigabytes), because nothing a call or a web session touches imports
-  `app/rag`. The Dockerfile says which line to change when that is wired in.
+- **The image leaves out the model libraries** (PyTorch and the NVIDIA runtime, several
+  gigabytes). The server starts without them, and the one thing that needs them, the WHO
+  guidance search on phone calls, is switched off there. Web sessions and the medicines
+  lookup are not affected. The Dockerfile says which line to change to put them in.
 - **The Anthropic key needs credit.** Without it Roopiee connects and listens, but
   every reply is the fallback line.
 - Not checked yet: whether Fly's proxy closes a paused conversation that sends nothing
   for a minute. If it does, send a keep-alive from the page while paused.
-=======
-## Lookups on a call: medicine names and WHO guidance
-
-```
-caller: "I take glycomate five hundred"
-   │
-   ▼
-Claude ──tool_use lookup_medicine("glycomate 500")──▶ medicines catalogue (Qdrant, 252,553 names)
-   │        caller hears "Let me check that medicine name."      found by spelling and sound
-   │◀─tool_result: not in the catalogue as heard; "Glycomet 500" is, and sounds like it ──┘
-   ▼
-"Did you mean Glycomet 500?"                     …and for a health question:
-
-Claude ──tool_use search_guidelines(query, age_years, pregnant)──▶ dense + BM25 → RRF → cross-encoder
-   │◀─tool_result: 5 passages, each under its document, section and page ──┘   filtered by population
-   ▼
-"World Health Organization guidance says…"
-```
-
-Claude decides when to look something up (`app/tools/knowledge.py`). Two tools:
-
-| Tool | What it searches | What Claude gets back |
-|---|---|---|
-| `lookup_medicine` | The Indian medicines catalogue: National List of Essential Medicines 2022, the Jan Aushadhi (PMBJP) list and the A to Z medicines dataset of India | The catalogue's spelling of the name, what the medicine contains, its strength and form where every product of that name agrees, or the products the name could mean |
-| `search_guidelines` | The WHO knowledge base, with the full hybrid + rerank pipeline below | Up to five passages, each with its document, publisher, section and page |
-
-- **A medicine is looked up before anything is said about it.** Medicine names are what speech
-  recognition gets wrong most. The catalogue is searched by letters and sound, so "glycomate" finds
-  Glycomet and "eco sprin" finds Ecosprin, with no model in the path.
-- **Rules decide the match** (`app/medicines/lookup.py`): the name as said (`exact`), a brand with
-  several products (`several`, and Claude asks which is on the strip), a name it could have been misheard
-  from (`close`, said back to confirm, with nothing else claimed about it), or not there (`unknown`). A
-  name that is merely like another is never swapped for it: the catalogue does not hold every medicine.
-- **Guidance is searched for the person asked about.** Claude asks their age first and passes it, and
-  pregnancy, with the search. Population is a hard filter: a child is never answered from adult guidance.
-- **No doses over the phone.** Passages carry doses for health workers. Claude may name the medicine
-  guidance recommends; the dose is left to a clinician or pharmacist.
-- **A caller is not left in silence.** A lookup means a second round with Claude, so a short line is
-  spoken while it runs. A lookup that fails, times out or has no index comes back to Claude as an error
-  it reports to the caller; it never guesses instead.
-- **What was looked up stays with the call.** `GET /api/calls/{call_sid}` returns `lookups` (tool,
-  outcome, duration) and `evidence` (document, section, page, excerpt), and latency gains
-  `lookup_medicine_ms` and `search_guidelines_ms`. Logs carry the tool and how it went, never what the
-  caller asked.
-
-Both stores live in the Qdrant named by `QDRANT_URL` and have to be filled once:
-
-```bash
-make index                            # WHO chunks → collection clinexa_who_primary_care
-make medicines                        # medicines catalogue → collection clinexa_medicines (about 3 minutes to Qdrant Cloud)
-make medicine NAME="glycomate 500"    # try one name against the catalogue
-curl localhost:8000/health            # "knowledge" shows each store's status
-```
-
-Without `QDRANT_URL` the WHO search uses the embedded local index (`make index ARGS="--local"`) and
-the medicine lookup is switched off: a quarter of a million names are too many for the embedded index.
-
-## Medicines catalogue
-
-| Source (`data/`) | Entries read | Names kept |
-|---|---|---|
-| `nlem2022.pdf`: National List of Essential Medicines 2022 | 1,348 | 1,155 |
-| `jan_aushdi.pdf`: Jan Aushadhi (PMBJP) product list | 2,111 | 2,088 |
-| `A_Z_medicines_dataset_of_India.csv` | 253,973 | 249,310 |
-| **Total**, one entry for each name | 257,432 | **252,553** |
-
-One Qdrant point for each name, no chunking. Each carries a sparse vector made of its words, numbers,
-three-letter groups and a sound key for each word, weighted by Qdrant's IDF, plus the medicine as
-payload (composition, strength, form, pack, manufacturer, source). A bi-encoder leg and a cross-encoder
-tie-break exist behind `MEDICINES_ENCODERS=true`; they are off by default because, measured on the
-whole catalogue, they did not change which medicine is found. The comparison is in
-[docs/rag.md](docs/rag.md).
->>>>>>> 5ed78ec (added the rag query for medicine catalogue)
 
 ## Knowledge base: WHO ingestion (Phase 5)
 
@@ -485,6 +506,7 @@ The most important ones:
 | `DEEPGRAM_KEYTERMS` | Terms boosted in speech recognition; defaults to common Indian medicine names |
 | `DEEPGRAM_ENDPOINTING_MS` / `DEEPGRAM_UTTERANCE_END_MS` | Turn-detection tuning |
 | `LOG_TRANSCRIPTS` | Log utterance text (off by default: transcripts are health data) |
+| `LOGFIRE_TOKEN` / `LOGFIRE_SERVICE_NAME` | Send traces to Pydantic Logfire; blank = no tracing |
 
 ### Quality gates
 
