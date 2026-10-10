@@ -1,4 +1,4 @@
-"""Exotel Voicebot WebSocket endpoint: Roopiee on a medicine reminder call.
+"""Exotel Voicebot WebSocket endpoint: Clinexsa on a medicine reminder call.
 
 How a call reaches here:
 1. The alerts worker asks Exotel to ring the patient and connect them to a flow.
@@ -7,7 +7,7 @@ How a call reaches here:
 3. Exotel opens this socket and streams the call audio both ways.
 
 Only calls the worker placed are served: the call's sid must match a delivery in
-the database. That is also where Roopiee learns which medicine the call is about.
+the database. That is also where Clinexsa learns which medicine the call is about.
 """
 
 from __future__ import annotations
@@ -156,7 +156,7 @@ async def exotel_stream(
                         return
                     registry.add(session)
                     session.start()
-                    # Roopiee speaks first: this is a call we placed.
+                    # Clinexsa speaks first: this is a call we placed.
                     session.request_reply()
                 case MarkMessage() as msg if session is not None:
                     session.on_mark(msg.mark.name)

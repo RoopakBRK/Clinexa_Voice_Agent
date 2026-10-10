@@ -1,4 +1,4 @@
-# Roopiee's server on Fly.io, in Mumbai. How to deploy is in README.md, "Hosting on Fly.io".
+# Clinexsa's server on Fly.io, in Mumbai. How to deploy is in README.md, "Hosting on Fly.io".
 #
 # One machine only, always on. Session tokens and the per-address rate limit are kept in
 # the process's memory, so a second machine would refuse tokens the first one handed out.

@@ -1,4 +1,4 @@
-"""Roopiee's onboarding agent: Claude tool calls -> the page -> tool results -> spoken text."""
+"""Clinexsa's onboarding agent: Claude tool calls -> the page -> tool results -> spoken text."""
 
 from __future__ import annotations
 
@@ -179,7 +179,7 @@ async def test_locked_field_result_reaches_claude_verbatim() -> None:
 
 
 async def test_opening_turn_and_page_notes_are_passed_as_bracketed_notes() -> None:
-    client = FakeClaude(([text_block("Hello, I'm Roopiee.")], "end_turn"))
+    client = FakeClaude(([text_block("Hello, I'm Clinexsa.")], "end_turn"))
     gen = agent(client, RecordingPage())
 
     await collect(gen.stream_reply([]))  # nobody has spoken yet

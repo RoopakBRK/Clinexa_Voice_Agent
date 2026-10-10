@@ -1,4 +1,4 @@
-"""Who may start a web session with Roopiee: only someone signed in to the website.
+"""Who may start a web session with Clinexsa: only someone signed in to the website.
 
 ``POST /web/session`` hands out a token that opens a conversation, and a conversation
 spends Deepgram and Anthropic credit. On a public address that must not be open to

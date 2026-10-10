@@ -2,7 +2,7 @@
 
 It plays the part of the page end to end:
   1. POST /web/session for a token and the stream URL
-  2. Open the WebSocket, send `start`, and wait for Roopiee's opening words
+  2. Open the WebSocket, send `start`, and wait for Clinexsa's opening words
   3. Say each --text line as 20 ms linear16 frames at 16 kHz, in real time
   4. Answer every `tool_call` the way the page would, keeping a tiny form in memory
   5. Print the transcript, the tool calls and the form that was filled
@@ -10,7 +10,7 @@ It plays the part of the page end to end:
 Usage (from repo root, API running on :8000):
   uv run --project apps/api python scripts/simulate_web_onboarding.py \\
       --text "My name is Ramesh Kumar and I am sixty two years old"
-  ... --save-reply reply.wav      also write Roopiee's speech to a WAV file
+  ... --save-reply reply.wav      also write Clinexsa's speech to a WAV file
 
 Uses the real Deepgram and Claude keys of the running API. Speech is made with
 macOS `say`.
@@ -150,7 +150,7 @@ async def receive(
         message = json.loads(raw)
         match message["type"]:
             case "transcript" if message["final"]:
-                who = "Roopiee" if message["role"] == "assistant" else "Person"
+                who = "Clinexsa" if message["role"] == "assistant" else "Person"
                 print(f"{stamp()}  {who}: {message['text']}")
             case "status":
                 if message["value"] == "listening" and state["status"] == "speaking":
@@ -177,7 +177,7 @@ async def send_speech(ws: ClientConnection, pcm: bytes) -> None:
 async def say_nothing_until_listening(
     ws: ClientConnection, state: dict[str, Any], *, replies: int, timeout_s: float
 ) -> None:
-    """Send silence, as an open mic does, until Roopiee has finished her next reply."""
+    """Send silence, as an open mic does, until Clinexsa has finished its next reply."""
     deadline = time.monotonic() + timeout_s
     while state["replies"] < replies:
         if time.monotonic() > deadline:

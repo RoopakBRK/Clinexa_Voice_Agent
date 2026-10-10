@@ -165,7 +165,7 @@ def test_session_endpoint_returns_a_stream_url_and_token(settings: Settings) -> 
     assert verify_web_token(STREAM_SECRET, ONBOARDING_ID, body["token"])
 
 
-def test_session_endpoint_reports_languages_roopiee_cannot_speak(settings: Settings) -> None:
+def test_session_endpoint_reports_languages_clinexsa_cannot_speak(settings: Settings) -> None:
     with TestClient(make_app(settings, FakeClaude())) as client:
         response = client.post(
             "/web/session", json={"onboarding_id": ONBOARDING_ID, "language": "kn"}
@@ -297,10 +297,10 @@ def said(frames: list[dict[str, Any] | bytes], role: str) -> str:
     )
 
 
-def test_roopiee_speaks_first_then_fills_the_form_from_speech(settings: Settings) -> None:
+def test_clinexsa_speaks_first_then_fills_the_form_from_speech(settings: Settings) -> None:
     claude = FakeClaude(
         ([tool_use("tu_1", "get_form_state")], "tool_use"),
-        ([text_block("Hello, I am Roopiee. What is your name?")], "end_turn"),
+        ([text_block("Hello, I am Clinexsa. What is your name?")], "end_turn"),
         (
             [tool_use("tu_2", "set_field", field="full_name", value="Ramesh", confidence=0.9)],
             "tool_use",
@@ -323,7 +323,7 @@ def test_roopiee_speaks_first_then_fills_the_form_from_speech(settings: Settings
             )
 
             opening = read_until(ws, is_type("status", value="listening"))
-            assert said(opening, "assistant") == "Hello, I am Roopiee. What is your name?"
+            assert said(opening, "assistant") == "Hello, I am Clinexsa. What is your name?"
             assert any(isinstance(f, bytes) for f in opening)  # the reply came as audio too
             assert {"type": "status", "value": "speaking"} in opening
 
