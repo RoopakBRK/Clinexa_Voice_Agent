@@ -77,7 +77,7 @@ class LowStock:
 
 @dataclass(frozen=True)
 class CallContext:
-    """What Roopiee needs to make one reminder call."""
+    """What Clinexsa needs to make one reminder call."""
 
     delivery_id: str
     first_name: str

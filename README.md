@@ -194,10 +194,10 @@ tie-break exist behind `MEDICINES_ENCODERS=true`; they are off by default becaus
 whole catalogue, they did not change which medicine is found. The comparison is in
 [docs/rag.md](docs/rag.md).
 
-## Roopiee on the website: the browser channel
+## Clinexsa on the website: the browser channel
 
 The Clinexsa website's "Onboarding for Patient" page talks to the same pipeline over a
-WebSocket instead of a phone line. Roopiee asks the questions, hears the answers and fills
+WebSocket instead of a phone line. Clinexsa asks the questions, hears the answers and fills
 the page's form through tool calls. The Twilio path is unchanged.
 
 ```
@@ -222,7 +222,7 @@ server -> browser   binary  linear16 24 kHz mono speech
   health details and are never logged.
 - Barge-in: when Deepgram reports `SpeechStarted` while a reply is still playing, the reply
   is cancelled and the page is told to `clear_audio`. If no words follow within a few
-  seconds (a cough, a door), Roopiee repeats her question. Phone calls are not affected.
+  seconds (a cough, a door), Clinexsa repeats the question. Phone calls are not affected.
 - `app/voice/languages.py`: Nova-3 transcribes all nine languages the page offers, but Aura
   has no Indian-language voices yet, so only English can be spoken. `POST /web/session`
   answers 422 `language_unavailable` for the others and `GET /web/languages` lists which
@@ -238,8 +238,8 @@ uv run --project apps/api python scripts/simulate_web_onboarding.py --api http:/
 
 ## Hosting on Fly.io
 
-The website can only reach Roopiee on a public https address. `Dockerfile` and
-`fly.toml` put her on Fly.io in Mumbai (`bom`), on one always-on machine.
+The website can only reach Clinexsa on a public https address. `Dockerfile` and
+`fly.toml` put it on Fly.io in Mumbai (`bom`), on one always-on machine.
 
 **Only a signed-in person can start a session.** `POST /web/session` asks Supabase
 whether the access token the website sent is real (`app/voice/sign_in.py`). With
@@ -264,7 +264,7 @@ fly deploy
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. The other settings are in `fly.toml`. If
 the name `clinexsa-roopiee` is taken, pick another and use that address below.
 
-Then tell the website where she is: on Vercel set
+Then tell the website where it is: on Vercel set
 `NEXT_PUBLIC_ROOPIEE_API_URL=https://clinexsa-roopiee.fly.dev` and redeploy.
 
 Check it without starting a conversation:
@@ -283,7 +283,7 @@ Things to know:
   gigabytes). The server starts without them, and the one thing that needs them, the WHO
   guidance search on phone calls, is switched off there. Web sessions and the medicines
   lookup are not affected. The Dockerfile says which line to change to put them in.
-- **The Anthropic key needs credit.** Without it Roopiee connects and listens, but
+- **The Anthropic key needs credit.** Without it Clinexsa connects and listens, but
   every reply is the fallback line.
 - Not checked yet: whether Fly's proxy closes a paused conversation that sends nothing
   for a minute. If it does, send a keep-alive from the page while paused.
@@ -524,7 +524,7 @@ make check       # all of the above
 | `GET` | `/health` | Liveness, STT / TTS / LLM provider status, medicines and guidance status, active call count |
 | `POST` | `/twilio/voice` | Twilio incoming-call webhook → TwiML |
 | `WS` | `/twilio/media-stream` | Twilio bidirectional Media Stream (caller audio in, reply audio out) |
-| `GET` | `/web/languages` | Languages the website offers, and which Roopiee can speak |
+| `GET` | `/web/languages` | Languages the website offers, and which Clinexsa can speak |
 | `POST` | `/web/session` | Short-lived token and stream URL for one website onboarding |
 | `WS` | `/web/onboarding-stream` | Browser channel: mic audio in, speech and form tool calls out |
 | `GET` | `/api/calls/active` | Live calls |

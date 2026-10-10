@@ -1,5 +1,5 @@
-# Roopiee's server, as it runs in production. Build from the repository root:
-#   docker build -t roopiee .
+# Clinexsa's server, as it runs in production. Build from the repository root:
+#   docker build -t clinexsa .
 #
 # The folders keep their depth (/srv/apps/api/app) because the settings code finds the
 # repository root by walking up from its own file.
@@ -24,8 +24,8 @@ RUN uv sync --frozen --no-dev --no-install-project \
 
 COPY apps/api/app ./app
 
-RUN useradd --system --no-create-home roopiee
-USER roopiee
+RUN useradd --system --no-create-home clinexsa
+USER clinexsa
 
 EXPOSE 8080
 # Behind Fly's proxy, so the forwarded scheme and host are trusted. /web/session builds the

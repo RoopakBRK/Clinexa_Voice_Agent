@@ -1,4 +1,4 @@
-"""Roopiee on a medicine reminder call.
+"""Clinexsa on a medicine reminder call.
 
 The opening line is written here, not by the model: it names the medicine and the
 time exactly as they are in the patient's record, with no chance of a slip. After
@@ -16,7 +16,7 @@ from app.notify.store import CallContext
 from app.notify.worker import clock
 
 REMINDER_PROMPT = """\
-You are Roopiee, the reminder voice for Clinexsa. You are on a phone call with
+You are Clinexsa, the medicine reminder voice. You are on a phone call with
 {first_name}. You called to remind them about one medicine: {medicine}{when}.
 You have already opened the call by saying: "{opening}"
 
@@ -54,7 +54,7 @@ _LANGUAGE_NAMES = {
 def opening_line(context: CallContext) -> str:
     when = f" It is your {clock(context.at)} medicine." if context.at else ""
     return (
-        f"Hello {context.first_name}, this is Roopiee from Clinexsa with your medicine reminder."
+        f"Hello {context.first_name}, this is Clinexsa with your medicine reminder."
         f"{when} It is time for {context.medicine.label}."
         f" Have you taken {'them' if context.count > 1 else 'it'}?"
     )

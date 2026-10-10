@@ -730,7 +730,7 @@ def test_the_call_stream_refuses_wrong_credentials_and_unknown_calls(settings: S
                 ws.receive_text()
 
 
-def test_roopiee_opens_a_reminder_call_with_the_medicine(settings: Settings) -> None:
+def test_clinexsa_opens_a_reminder_call_with_the_medicine(settings: Settings) -> None:
     context = CallContext("d1", "Lakshmi", "en", METFORMIN, time(8, 0))
     tts = FakeTTSProvider()
     stt = FakeSTTProvider([TranscriptEvent(type="metadata")])  # type: ignore[arg-type]

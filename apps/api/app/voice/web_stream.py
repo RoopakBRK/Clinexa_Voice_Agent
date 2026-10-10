@@ -2,7 +2,7 @@
 
 ``POST /web/session`` hands the page a short-lived token; the page then opens
 ``/web/onboarding-stream`` and streams microphone audio (binary linear16 16 kHz)
-while Roopiee speaks back (binary linear16 24 kHz) and fills the page's form
+while Clinexsa speaks back (binary linear16 24 kHz) and fills the page's form
 through ``tool_call`` / ``tool_result`` messages.
 
 No provider keys ever reach the browser.
@@ -157,7 +157,7 @@ async def create_web_session(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             {
                 "code": "language_unavailable",
-                "message": f"Roopiee can't speak {language.name} yet. Coming soon.",
+                "message": f"Clinexsa can't speak {language.name} yet. Coming soon.",
             },
         )
 
@@ -176,7 +176,7 @@ async def _require_sign_in(request: Request, settings: Settings) -> None:
         if settings.environment == "production":
             raise HTTPException(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
-                {"code": "unavailable", "message": "Roopiee's sign-in check isn't set up."},
+                {"code": "unavailable", "message": "Clinexsa's sign-in check isn't set up."},
             )
         return
 
@@ -186,12 +186,12 @@ async def _require_sign_in(request: Request, settings: Settings) -> None:
     except SignInUnavailableError:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            {"code": "unavailable", "message": "Roopiee couldn't check your sign-in just now."},
+            {"code": "unavailable", "message": "Clinexsa couldn't check your sign-in just now."},
         ) from None
     if not signed_in:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            {"code": "signed_out", "message": "Sign in to talk to Roopiee."},
+            {"code": "signed_out", "message": "Sign in to talk to Clinexsa."},
         )
 
 
@@ -320,7 +320,7 @@ class _OnboardingConnection:
         language = resolve_language(msg.language)
         if language is None or language.tts_model is None:
             name = language.name if language else "that language"
-            await self._fail("language_unavailable", f"Roopiee can't speak {name} yet.")
+            await self._fail("language_unavailable", f"Clinexsa can't speak {name} yet.")
             return False
 
         call_sid = f"web-{msg.onboarding_id}-{secrets.token_hex(3)}"
@@ -338,7 +338,7 @@ class _OnboardingConnection:
         if stt is None or tts is None or agent is None:
             log.error("web.rejected", reason="providers_not_configured")
             await self._fail(
-                "unavailable", "Roopiee isn't set up on this server.", WS_INTERNAL_ERROR
+                "unavailable", "Clinexsa isn't set up on this server.", WS_INTERNAL_ERROR
             )
             return False
 
@@ -357,7 +357,7 @@ class _OnboardingConnection:
         self._registry.add(self._session)
         self._session.start()
         log.info("web.session_started", language=language.code, resumed=resumed)
-        # Roopiee speaks first.
+        # Clinexsa speaks first.
         self._session.request_reply()
         return True
 

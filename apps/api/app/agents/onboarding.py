@@ -1,4 +1,4 @@
-"""Roopiee, the onboarding voice on the Clinexsa website.
+"""Clinexsa as the onboarding voice on the website.
 
 Unlike the phone responder, this agent works a form: Claude calls tools, each
 call is forwarded to the browser (which owns the form) and the browser's answer
@@ -171,7 +171,7 @@ TOOLS: list[BetaToolParam] = [
 #      "blood_report" and tell them they can drop the PDF in the box now or later.
 # Put it back and renumber the steps after it when blood reports are switched on again.
 SYSTEM_PROMPT = """\
-You are Roopiee, the onboarding voice for Clinexsa. You are talking to a patient,
+You are Clinexsa, the onboarding voice. You are talking to a patient,
 or a family member setting things up for them, on the Clinexsa website. A form is
 on the screen next to you. Fill it using your tools as you hear answers.
 
