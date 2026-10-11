@@ -23,17 +23,17 @@ what the retrieval pipelines hold and how they measure: **[docs/rag.md](docs/rag
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Twilio → WebSocket → Deepgram streaming STT | ✅ done |
-| 2 | STT → Claude → streaming TTS → Twilio (spoken replies) | ✅ built; telephony, STT and TTS verified on simulated live calls, the Claude call so far only against a fake |
-| 5 | WHO document ingestion & chunking → `data/processed/chunks.jsonl` | ✅ done |
-| 6 | Local embeddings (bge-small) + Qdrant dense retrieval with metadata filters | ✅ done (indexed in Qdrant Cloud and on the embedded index) |
-| 7 | BM25 + reciprocal rank fusion hybrid retrieval, clinical metadata filters | ✅ done |
-| 8 | Cross-encoder reranking + retrieval evaluation harness | ✅ built; question set is a **draft awaiting human review** |
-| — | Lookups on a call: Claude tools for medicine names (Indian medicines catalogue) and WHO guidance | ✅ built; each tool run against real data, the Claude loop so far only against a scripted model |
+| 1 | Twilio → WebSocket → Deepgram streaming STT | done |
+| 2 | STT → Claude → streaming TTS → Twilio (spoken replies) | built; telephony, STT and TTS verified on simulated live calls, the Claude call so far only against a fake |
+| 5 | WHO document ingestion & chunking → `data/processed/chunks.jsonl` | done |
+| 6 | Local embeddings (bge-small) + Qdrant dense retrieval with metadata filters | done (indexed in Qdrant Cloud and on the embedded index) |
+| 7 | BM25 + reciprocal rank fusion hybrid retrieval, clinical metadata filters | done |
+| 8 | Cross-encoder reranking + retrieval evaluation harness | built; question set is a **draft awaiting human review** |
+| — | Lookups on a call: Claude tools for medicine names (Indian medicines catalogue) and WHO guidance | built; each tool run against real data, the Claude loop so far only against a scripted model |
 | 3 | Endpointing tuning, barge-in, persistent TTS connection | |
 | 4 | LangGraph state machine | |
 | 9–12 | Intake · red-flag safety · human escalation agents (medicine and guidance lookups already work as tools) | |
-| 14 | Tracing to Pydantic Logfire over OpenTelemetry | ✅ done: each call is one trace (replies, Claude requests, lookups), with no caller content in it |
+| 14 | Tracing to Pydantic Logfire over OpenTelemetry | done: each call is one trace (replies, Claude requests, lookups), with no caller content in it |
 | 13 | Redis + PostgreSQL memory | |
 | 15 | RAG + safety evaluation | |
 | 16–17 | Next.js dashboard · Docker + deployment | |
