@@ -12,7 +12,7 @@ step — escalating to a human clinician when needed.
 **Stack:** Twilio Voice + Media Streams · Deepgram streaming STT + Aura TTS · Claude with tool use ·
 FastAPI (async) · hybrid RAG (Qdrant + BM25 + RRF + cross-encoder) · medicine-name search
 (Qdrant sparse vectors of spelling and sound) · LangGraph multi-agent orchestration ·
-PostgreSQL · Redis · Pydantic Logfire (OpenTelemetry) · Next.js dashboard
+PostgreSQL · Pydantic Logfire (OpenTelemetry) · Next.js dashboard
 
 Full design with diagrams: **[docs/architecture.md](docs/architecture.md)** ·
 what the retrieval pipelines hold and how they measure: **[docs/rag.md](docs/rag.md)**
@@ -34,7 +34,7 @@ what the retrieval pipelines hold and how they measure: **[docs/rag.md](docs/rag
 | 4 | LangGraph state machine | |
 | 9–12 | Intake · red-flag safety · human escalation agents (medicine and guidance lookups already work as tools) | |
 | 14 | Tracing to Pydantic Logfire over OpenTelemetry | done: each call is one trace (replies, Claude requests, lookups), with no caller content in it |
-| 13 | Redis + PostgreSQL memory | |
+| 13 | PostgreSQL memory | |
 | 15 | RAG + safety evaluation | |
 | 16–17 | Next.js dashboard · Docker + deployment | |
 
